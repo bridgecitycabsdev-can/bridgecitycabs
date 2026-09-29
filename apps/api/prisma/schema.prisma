@@ -1,0 +1,35 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Branch {
+  id        String   @id @default(uuid())
+  name      String
+  city      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  users     User[]
+}
+
+model Role {
+  id    String @id @default(uuid())
+  name  String @unique // super_admin, branch_admin, dispatcher, customer_care, hr_admin, accounts_admin, driver, passenger
+  users User[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String?  @unique
+  phone        String?  @unique
+  passwordHash String?
+  branchId     String?
+  branch       Branch?  @relation(fields: [branchId], references: [id])
+  roleId       String
+  role         Role     @relation(fields: [roleId], references: [id])
+  createdAt    DateTime @default(now())
+}

@@ -17,19 +17,48 @@ model Branch {
 }
 
 model Role {
-  id    String @id @default(uuid())
-  name  String @unique // super_admin, branch_admin, dispatcher, customer_care, hr_admin, accounts_admin, driver, passenger
-  users User[]
+  id          String           @id @default(uuid())
+  name        String           @unique // super_admin, branch_admin, dispatcher, customer_care, hr_admin, accounts_admin, driver, passenger
+  users       User[]
+  permissions RolePermission[]
 }
 
 model User {
-  id           String   @id @default(uuid())
-  email        String?  @unique
-  phone        String?  @unique
-  passwordHash String?
-  branchId     String?
-  branch       Branch?  @relation(fields: [branchId], references: [id])
+  id            String         @id @default(uuid())
+  email         String?        @unique
+  phone         String?        @unique
+  passwordHash  String?
+  branchId      String?
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  roleId        String
+  role          Role           @relation(fields: [roleId], references: [id])
+  isActive      Boolean        @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime       @default(now())
+  refreshTokens RefreshToken[]
+}
+
+model Permission {
+  id    String           @id @default(uuid())
+  code  String           @unique // e.g. "branches.read", "branches.write", "drivers.approve"
+  roles RolePermission[]
+}
+
+model RolePermission {
   roleId       String
-  role         Role     @relation(fields: [roleId], references: [id])
-  createdAt    DateTime @default(now())
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id])
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
 }

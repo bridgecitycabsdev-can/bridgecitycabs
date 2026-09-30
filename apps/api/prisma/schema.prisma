@@ -11,11 +11,16 @@ model Branch {
   id        String    @id @default(uuid())
   name      String
   city      String
-  active    Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  users     User[]
-  vehicles  Vehicle[]
-  drivers   Driver[]
+  active     Boolean    @default(true)
+  timezone   String     @default("America/Edmonton")
+  currency   String     @default("CAD")
+  gstRateBps Int        @default(500)
+  createdAt  DateTime   @default(now())
+  users      User[]
+  vehicles   Vehicle[]
+  drivers    Driver[]
+  fareRules  FareRule[]
+  bookings   Booking[]
 }
 
 model Role {
@@ -65,9 +70,11 @@ enum DocumentOwner {
 model VehicleType {
   id       String         @id @default(uuid())
   name     String         @unique // Sedan, SUV, Minivan, Luxury
-  active   Boolean        @default(true)
-  models   VehicleModel[]
-  vehicles Vehicle[]
+  active    Boolean        @default(true)
+  models    VehicleModel[]
+  vehicles  Vehicle[]
+  fareRules FareRule[]
+  bookings  Booking[]
 }
 
 model VehicleMake {
@@ -107,6 +114,7 @@ model Vehicle {
   createdAt     DateTime                  @default(now())
   assignments   DriverVehicleAssignment[]
   documents     Document[]
+  bookings      Booking[]
 
   @@unique([branchId, plateNumber])
   @@index([branchId])
@@ -122,6 +130,7 @@ model Driver {
   firstName    String
   lastName     String
   phone        String
+  ladyDriverEligible Boolean?
   status           DriverStatus              @default(PENDING_DOCUMENTS)
   approvedAt       DateTime?
   approvedById     String?
@@ -131,6 +140,7 @@ model Driver {
   createdAt    DateTime                  @default(now())
   assignments  DriverVehicleAssignment[]
   documents    Document[]
+  bookings     Booking[]
 
   @@index([branchId, status])
 }
@@ -162,6 +172,7 @@ model Passenger {
   blockReason   String?
   blockedAt     DateTime?
   unblockReason String?
+  bookings      Booking[]
 }
 
 model DocumentType {
@@ -218,4 +229,210 @@ model RefreshToken {
   expiresAt DateTime
   revokedAt DateTime?
   createdAt DateTime  @default(now())
+}
+
+enum BookingStatus {
+  SCHEDULED
+  CREATED
+  SEARCHING_DRIVER
+  MATCHED
+  DRIVER_ASSIGNED
+  DRIVER_ARRIVING
+  DRIVER_ARRIVED
+  TRIP_STARTED
+  TRIP_COMPLETED
+  PAYMENT_PENDING
+  PAYMENT_COMPLETED
+  CLOSED
+  CANCELLED
+  NO_DRIVER_FOUND
+}
+
+enum BookingSource {
+  DISPATCH
+  PASSENGER_APP
+  DRIVER_APP
+}
+
+enum FareZone {
+  INSIDE_TOWN
+  OUT_OF_TOWN
+}
+
+enum PaymentMethod {
+  CARD
+  CASH
+  WALLET
+  ACCOUNT
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum StopType {
+  PICKUP
+  DROPOFF
+  STOP
+}
+
+enum ActorType {
+  SYSTEM
+  STAFF
+  PASSENGER
+  DRIVER
+}
+
+enum AssignMethod {
+  MANUAL
+  AUTO
+}
+
+enum AssignEndReason {
+  REASSIGNED
+  DRIVER_CANCELLED
+  COMPLETED
+  BOOKING_CANCELLED
+  TIMEOUT
+}
+
+enum CancelReason {
+  PASSENGER_REQUEST
+  DRIVER_NO_SHOW
+  PASSENGER_NO_SHOW
+  DUPLICATE
+  OPERATIONAL
+  OTHER
+}
+
+model FareRule {
+  id             String      @id @default(uuid())
+  branchId       String
+  branch         Branch      @relation(fields: [branchId], references: [id])
+  vehicleTypeId  String
+  vehicleType    VehicleType @relation(fields: [vehicleTypeId], references: [id])
+  zone           FareZone
+  title          String
+  baseFareCents  Int
+  perKmCents     Int
+  perMinuteCents Int         @default(0)
+  minFareCents   Int         @default(0)
+  active         Boolean     @default(true)
+
+  @@unique([branchId, vehicleTypeId, zone])
+}
+
+model Booking {
+  id                   String        @id @default(uuid())
+  trackingId           String        @unique // human-friendly, e.g. BC-7K3MQ9XT
+  legacyId             Int?          @unique
+  version              Int           @default(0) // optimistic locking
+  branchId             String
+  branch               Branch        @relation(fields: [branchId], references: [id])
+  source               BookingSource
+  status               BookingStatus @default(CREATED)
+  passengerId          String?
+  passenger            Passenger?    @relation(fields: [passengerId], references: [id])
+  passengerName        String // snapshot: phone-in customers may have no account
+  passengerPhone       String
+  createdById          String? // staff or passenger user
+  vehicleTypeId        String
+  vehicleType          VehicleType   @relation(fields: [vehicleTypeId], references: [id])
+  vanOnly              Boolean       @default(false)
+  ladyDriverOnly       Boolean       @default(false)
+  zone                 FareZone      @default(INSIDE_TOWN)
+  corporateAccountId   String? // relation added when corporate accounts are built
+  scheduledAt          DateTime? // UTC; null means "now"
+  distanceMeters       Int
+  durationSeconds      Int
+  quotedFareCents      Int
+  quotedTaxCents       Int
+  fixedFareCents       Int? // dispatcher override
+  finalFareCents       Int? // set at completion
+  cancellationFeeCents Int           @default(0)
+  paymentMethod        PaymentMethod @default(CASH)
+  paymentStatus        PaymentStatus @default(UNPAID)
+  notes                String?
+  driverId             String? // current driver snapshot, cleared on un-assign
+  driver               Driver?       @relation(fields: [driverId], references: [id])
+  vehicleId            String?
+  vehicle              Vehicle?      @relation(fields: [vehicleId], references: [id])
+  cancelledBy          ActorType?
+  cancelReason         CancelReason?
+  cancelNote           String?
+  assignedAt           DateTime?
+  arrivedAt            DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  closedAt             DateTime?
+  cancelledAt          DateTime?
+  createdAt            DateTime      @default(now())
+  stops                BookingStop[]
+  history              BookingStatusHistory[]
+  assignments          BookingAssignment[]
+
+  @@index([branchId, status, createdAt])
+  @@index([driverId, status])
+  @@index([passengerId, createdAt])
+  @@index([scheduledAt])
+}
+
+model BookingStop {
+  id        String    @id @default(uuid())
+  bookingId String
+  booking   Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  sequence  Int
+  type      StopType
+  address   String
+  lat       Float
+  lng       Float
+  placeId   String?
+  arrivedAt DateTime?
+
+  @@unique([bookingId, sequence])
+}
+
+model BookingStatusHistory {
+  id          String         @id @default(uuid())
+  bookingId   String
+  booking     Booking        @relation(fields: [bookingId], references: [id])
+  fromStatus  BookingStatus?
+  toStatus    BookingStatus
+  actorType   ActorType
+  actorUserId String?
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+
+  @@index([bookingId, createdAt])
+}
+
+model BookingAssignment {
+  id           String           @id @default(uuid())
+  bookingId    String
+  booking      Booking          @relation(fields: [bookingId], references: [id])
+  driverId     String
+  vehicleId    String
+  method       AssignMethod
+  assignedById String?
+  assignedAt   DateTime         @default(now())
+  endedAt      DateTime?
+  endReason    AssignEndReason?
+
+  @@index([driverId, assignedAt])
+}
+
+model IdempotencyKey {
+  id           String   @id @default(uuid())
+  userId       String
+  key          String
+  requestHash  String
+  responseCode Int?
+  responseBody Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, key])
 }

@@ -26,6 +26,12 @@ const PERMISSIONS = [
   'vehicles.write',
   'passengers.read',
   'passengers.write',
+  'bookings.read',
+  'bookings.write',
+  'bookings.assign',
+  'bookings.cancel',
+  'fares.read',
+  'fares.write',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
@@ -149,10 +155,23 @@ async function main() {
   const branch = existingBranch
     ? await prisma.branch.update({
         where: { id: existingBranch.id },
-        data: { city: 'Lethbridge', active: true },
+        data: {
+          city: 'Lethbridge',
+          active: true,
+          timezone: 'America/Edmonton',
+          currency: 'CAD',
+          gstRateBps: 500,
+        },
       })
     : await prisma.branch.create({
-        data: { name: 'Lethbridge', city: 'Lethbridge', active: true },
+        data: {
+          name: 'Lethbridge',
+          city: 'Lethbridge',
+          active: true,
+          timezone: 'America/Edmonton',
+          currency: 'CAD',
+          gstRateBps: 500,
+        },
       });
 
   const superAdminRoleId = roles.get('super_admin');
@@ -231,12 +250,76 @@ async function main() {
   }
 
   if (process.env.NODE_ENV !== 'production') {
+    await seedPlaceholderFares(branch.id, vehicleTypes);
     const driverRoleId = roles.get('driver');
     const passengerRoleId = roles.get('passenger');
     if (!driverRoleId || !passengerRoleId) {
       throw new Error('Missing driver or passenger role');
     }
     await seedDemo(branch.id, admin.id, driverRoleId, passengerRoleId, models);
+  }
+}
+
+// Screenshot placeholders, tax-exclusive, minimum and per-minute left at 0.
+// Out-of-town amounts were not in the notes available here, so they are not seeded.
+const PLACEHOLDER_FARES = [
+  {
+    type: 'SUV',
+    zone: 'INSIDE_TOWN',
+    title: 'SUV inside town',
+    baseFareCents: 595,
+    perKmCents: 249,
+  },
+  {
+    type: 'Minivan',
+    zone: 'INSIDE_TOWN',
+    title: 'Minivan inside town',
+    baseFareCents: 695,
+    perKmCents: 250,
+  },
+  {
+    type: 'Luxury',
+    zone: 'INSIDE_TOWN',
+    title: 'Luxury inside town',
+    baseFareCents: 3000,
+    perKmCents: 1000,
+  },
+] as const;
+
+async function seedPlaceholderFares(
+  branchId: string,
+  vehicleTypes: Map<string, string>,
+) {
+  for (const fare of PLACEHOLDER_FARES) {
+    const vehicleTypeId = vehicleTypes.get(fare.type);
+    if (!vehicleTypeId) {
+      throw new Error(`Missing vehicle type ${fare.type}`);
+    }
+    await prisma.fareRule.upsert({
+      where: {
+        branchId_vehicleTypeId_zone: {
+          branchId,
+          vehicleTypeId,
+          zone: fare.zone,
+        },
+      },
+      update: {
+        title: fare.title,
+        baseFareCents: fare.baseFareCents,
+        perKmCents: fare.perKmCents,
+        perMinuteCents: 0,
+        minFareCents: 0,
+        active: true,
+      },
+      create: {
+        branchId,
+        vehicleTypeId,
+        zone: fare.zone,
+        title: fare.title,
+        baseFareCents: fare.baseFareCents,
+        perKmCents: fare.perKmCents,
+      },
+    });
   }
 }
 

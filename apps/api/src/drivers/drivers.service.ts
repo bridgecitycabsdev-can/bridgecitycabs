@@ -181,6 +181,7 @@ export class DriversService {
             lastName: dto.lastName,
             phone,
             branchId,
+            ladyDriverEligible: dto.ladyDriverEligible,
           },
           include: listInclude,
         });

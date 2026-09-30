@@ -14,17 +14,35 @@ import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { STAFF_ROLES } from '../common/staff-roles.js';
+import { LocationHistoryQuery } from './dto/location-history-query.dto.js';
+import { FleetStateService } from '../fleet/fleet-state.service.js';
+import { LocationHistoryService } from '../fleet/location-history.service.js';
 import { DriversService } from './drivers.service.js';
 import { CreateDriverDto } from './dto/create-driver.dto.js';
 import { DriverOptionsQuery } from './dto/driver-options-query.dto.js';
 import { DriverQuery } from './dto/driver-query.dto.js';
+import { ForceOfflineDto } from './dto/force-offline.dto.js';
 import { SuspendDriverDto } from './dto/suspend-driver.dto.js';
 import { UpdateDriverDto } from './dto/update-driver.dto.js';
 
 @Controller('drivers')
 @Roles(...STAFF_ROLES)
 export class DriversController {
-  constructor(private readonly drivers: DriversService) {}
+  constructor(
+    private readonly drivers: DriversService,
+    private readonly fleet: FleetStateService,
+    private readonly locations: LocationHistoryService,
+  ) {}
+
+  @Get(':id/locations')
+  @Roles('super_admin', 'branch_admin')
+  locationsHistory(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: LocationHistoryQuery,
+  ) {
+    return this.locations.read(user, id, query);
+  }
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateDriverDto) {
@@ -66,6 +84,16 @@ export class DriversController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.drivers.approve(id, user);
+  }
+
+  @Post(':id/force-offline')
+  @HttpCode(HttpStatus.OK)
+  forceOffline(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ForceOfflineDto,
+  ) {
+    return this.fleet.forceOffline(id, user, dto.reason);
   }
 
   @Post(':id/suspend')

@@ -1,0 +1,63 @@
+import type { DriverPresenceState } from '@bridgecabs/shared-types';
+import type { BookingStatus } from '@prisma/client';
+
+const PRESENCE_BY_BOOKING: Partial<Record<BookingStatus, DriverPresenceState>> = {
+  MATCHED: 'ASSIGNED',
+  DRIVER_ASSIGNED: 'ASSIGNED',
+  DRIVER_ARRIVING: 'EN_ROUTE_PICKUP',
+  DRIVER_ARRIVED: 'ARRIVED',
+  TRIP_STARTED: 'ON_TRIP',
+};
+
+export function presenceFromBooking(status: BookingStatus | null): DriverPresenceState {
+  if (!status) return 'AVAILABLE';
+  return PRESENCE_BY_BOOKING[status] ?? 'AVAILABLE';
+}
+
+/** Presence written when this booking status is committed. Payment does not move the driver. */
+const PRESENCE_ON_STATUS: Partial<Record<BookingStatus, DriverPresenceState>> = {
+  DRIVER_ASSIGNED: 'ASSIGNED',
+  DRIVER_ARRIVING: 'EN_ROUTE_PICKUP',
+  DRIVER_ARRIVED: 'ARRIVED',
+  TRIP_STARTED: 'ON_TRIP',
+  TRIP_COMPLETED: 'AVAILABLE',
+  SEARCHING_DRIVER: 'AVAILABLE',
+  CANCELLED: 'AVAILABLE',
+  NO_DRIVER_FOUND: 'AVAILABLE',
+};
+
+export function presenceOnBookingStatus(status: BookingStatus): DriverPresenceState | null {
+  return PRESENCE_ON_STATUS[status] ?? null;
+}
+
+const RELEASE_STATUSES = new Set<BookingStatus>([
+  'SEARCHING_DRIVER',
+  'CANCELLED',
+  'NO_DRIVER_FOUND',
+]);
+
+/**
+ * Driver to free when a booking leaves them.
+ * Assignments are newest ended first. A booking that already moved on keeps its new driver.
+ */
+export function driverIdReleasedBy(
+  eventTo: BookingStatus,
+  booking: { status: BookingStatus; driverId: string | null },
+  assignmentsNewestEndedFirst: readonly string[],
+) {
+  if (!RELEASE_STATUSES.has(eventTo)) return null;
+  const movedOn = booking.status !== eventTo && booking.driverId != null;
+  if (!movedOn && booking.driverId) return booking.driverId;
+  const exclude = movedOn ? booking.driverId : null;
+  return assignmentsNewestEndedFirst.find((id) => id !== exclude) ?? null;
+}
+
+export function passengerFirstName(
+  accountFirstName: string | null | undefined,
+  passengerName: string,
+) {
+  const fromAccount = accountFirstName?.trim();
+  if (fromAccount) return fromAccount;
+  const token = passengerName.trim().split(/\s+/)[0];
+  return token || 'Passenger';
+}

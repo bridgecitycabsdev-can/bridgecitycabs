@@ -5,7 +5,6 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { parsePhoneNumberFromString } from 'libphonenumber-js';
@@ -14,6 +13,10 @@ import { branchIdForCreate, branchWhere } from '../common/branch-scope.js';
 import { normalizePage, paginate } from '../common/pagination.js';
 import { normalizePhone } from '../common/phone.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  assertDocumentsPresent,
+  missingRequiredDocumentCodes,
+} from '../documents/required-documents.js';
 import { assertDriverTransition } from './driver-status.js';
 import type { CreateDriverDto } from './dto/create-driver.dto.js';
 import type { DriverOptionsQuery } from './dto/driver-options-query.dto.js';
@@ -194,27 +197,7 @@ export class DriversService {
     return this.prisma.$transaction(async (tx) => {
       const driver = await this.findScoped(id, user, tx);
       assertDriverTransition(driver.status, 'APPROVED');
-      const required = await tx.documentType.findMany({
-        where: { owner: 'DRIVER', required: true },
-        orderBy: { code: 'asc' },
-      });
-      const approved = await tx.document.findMany({
-        where: {
-          driverId: id,
-          status: 'APPROVED',
-          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-        },
-      });
-      const missing = required.filter(
-        (documentType) =>
-          !approved.some((document) => document.documentTypeId === documentType.id),
-      );
-      if (missing.length) {
-        throw new UnprocessableEntityException({
-          message: 'Missing documents',
-          missing: missing.map((documentType) => documentType.code),
-        });
-      }
+      assertDocumentsPresent(await missingRequiredDocumentCodes(tx, { driverId: id }));
       return tx.driver.update({
         where: { id },
         data: {

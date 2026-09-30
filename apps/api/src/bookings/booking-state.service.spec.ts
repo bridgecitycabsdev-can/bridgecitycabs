@@ -74,9 +74,15 @@ describe('driverRelease', () => {
 });
 
 describe('BookingStateService.transition', () => {
-  function setup(status: BookingStatus = 'CREATED', version = 3) {
+  function setup(
+    status: BookingStatus = 'CREATED',
+    version = 3,
+    driverId: string | null = null,
+  ) {
     const booking = {
       id: 'booking-1',
+      branchId: 'branch-1',
+      driverId,
       status,
       version,
     };
@@ -105,7 +111,7 @@ describe('BookingStateService.transition', () => {
         ),
       },
     };
-    const events = { emit: vi.fn() };
+    const events = { emit: vi.fn(), emitAsync: vi.fn(async () => []) };
     const prisma = {
       $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => {
         const result = await run(tx);
@@ -123,8 +129,9 @@ describe('BookingStateService.transition', () => {
   it('writes history and emits only after the transaction commits', async () => {
     const { service, events, history, updates, isCommitted } = setup();
 
-    events.emit.mockImplementation(() => {
+    events.emitAsync.mockImplementation(async () => {
       expect(isCommitted()).toBe(true);
+      return [];
     });
 
     const result = await service.transition(
@@ -136,8 +143,11 @@ describe('BookingStateService.transition', () => {
 
     expect(result).toEqual({
       bookingId: 'booking-1',
+      branchId: 'branch-1',
       from: 'CREATED',
       to: 'SEARCHING_DRIVER',
+      prevDriverId: null,
+      driverId: null,
     });
     expect(updates[0]?.where).toEqual({
       id: 'booking-1',
@@ -159,7 +169,7 @@ describe('BookingStateService.transition', () => {
         metadata: undefined,
       },
     ]);
-    expect(events.emit).toHaveBeenCalledWith('booking.status_changed', result);
+    expect(events.emitAsync).toHaveBeenCalledWith('booking.status_changed', result);
   });
 
   it('does not emit when the caller owns the transaction', async () => {
@@ -173,7 +183,7 @@ describe('BookingStateService.transition', () => {
     );
 
     expect(prisma.$transaction).not.toHaveBeenCalled();
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(events.emitAsync).not.toHaveBeenCalled();
   });
 
   it('accepts every legal transition for each permitted actor', async () => {
@@ -188,7 +198,14 @@ describe('BookingStateService.transition', () => {
             type: actor,
             userId: actor === 'SYSTEM' ? undefined : 'user-1',
           });
-          expect(result).toEqual({ bookingId: 'booking-1', from, to });
+          expect(result).toEqual({
+            bookingId: 'booking-1',
+            branchId: 'branch-1',
+            from,
+            to,
+            prevDriverId: null,
+            driverId: null,
+          });
           expect(history[0]).toMatchObject({
             fromStatus: from,
             toStatus: to,
@@ -214,7 +231,7 @@ describe('BookingStateService.transition', () => {
       'Illegal transition TRIP_STARTED → CANCELLED',
     );
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(events.emitAsync).not.toHaveBeenCalled();
   });
 
   it('returns 403 when a passenger attempts TRIP_STARTED', async () => {
@@ -227,11 +244,13 @@ describe('BookingStateService.transition', () => {
     expect(error).toBeInstanceOf(ForbiddenException);
     expect((error as ForbiddenException).getStatus()).toBe(403);
     expect(tx.booking.updateMany).not.toHaveBeenCalled();
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(events.emitAsync).not.toHaveBeenCalled();
   });
 
   it('lets exactly one of two simultaneous transitions win', async () => {
     const committed = {
+      branchId: 'branch-1',
+      driverId: 'driver-1',
       status: 'DRIVER_ASSIGNED' as BookingStatus,
       version: 4,
     };
@@ -268,7 +287,7 @@ describe('BookingStateService.transition', () => {
         ),
       },
     };
-    const events = { emit: vi.fn() };
+    const events = { emit: vi.fn(), emitAsync: vi.fn(async () => []) };
     const prisma = {
       $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
     };
@@ -291,7 +310,7 @@ describe('BookingStateService.transition', () => {
     expect(reason.getStatus()).toBe(409);
     expect(reason.message).toBe('Booking changed, retry');
     expect(history).toHaveLength(1);
-    expect(events.emit).toHaveBeenCalledTimes(1);
+    expect(events.emitAsync).toHaveBeenCalledTimes(1);
   });
 
   it('rejects an actor who cannot make an otherwise legal move', async () => {
@@ -309,7 +328,7 @@ describe('BookingStateService.transition', () => {
     await expect(
       service.transition('booking-1', 'CANCELLED', { type: 'STAFF' }),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(events.emitAsync).not.toHaveBeenCalled();
   });
 
   it('refuses the write when the version changed underneath', async () => {
@@ -320,28 +339,32 @@ describe('BookingStateService.transition', () => {
       service.transition('booking-1', 'SEARCHING_DRIVER', { type: 'DRIVER' }),
     ).rejects.toThrow('Booking changed, retry');
     expect(tx.bookingStatusHistory.create).not.toHaveBeenCalled();
-    expect(events.emit).not.toHaveBeenCalled();
+    expect(events.emitAsync).not.toHaveBeenCalled();
   });
 
   it('clears the assigned driver when returning to search, unless the patch sets one', async () => {
-    const released = setup('DRIVER_ARRIVING');
-    await released.service.transition('booking-1', 'SEARCHING_DRIVER', {
+    const released = setup('DRIVER_ARRIVING', 3, 'driver-a');
+    const freed = await released.service.transition('booking-1', 'SEARCHING_DRIVER', {
       type: 'STAFF',
     });
+    expect(freed.prevDriverId).toBe('driver-a');
+    expect(freed.driverId).toBeNull();
     expect(released.updates[0]?.data).toMatchObject({
       driverId: null,
       vehicleId: null,
     });
 
-    const patched = setup('DRIVER_ASSIGNED');
-    await patched.service.transition(
+    const patched = setup('DRIVER_ASSIGNED', 3, 'driver-a');
+    const kept = await patched.service.transition(
       'booking-1',
       'SEARCHING_DRIVER',
       { type: 'SYSTEM' },
-      { patch: { driverId: 'kept' } },
+      { patch: { driverId: 'driver-b' } },
     );
+    expect(kept.prevDriverId).toBe('driver-a');
+    expect(kept.driverId).toBe('driver-b');
     expect(patched.updates[0]?.data).toMatchObject({
-      driverId: 'kept',
+      driverId: 'driver-b',
       vehicleId: null,
     });
   });

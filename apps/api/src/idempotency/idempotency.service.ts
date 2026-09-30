@@ -20,10 +20,19 @@ export type IdempotencyClaim =
       responseBody: Prisma.JsonValue;
     };
 
-// Rows older than 24 hours are purged by a scheduled job once BullMQ is added.
+export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
+
+// Rows older than 24 hours are deleted by the daily idempotency-purge job.
 @Injectable()
 export class IdempotencyService {
   constructor(private readonly prisma: PrismaService) {}
+
+  async purgeExpired(now = new Date()) {
+    const result = await this.prisma.idempotencyKey.deleteMany({
+      where: { createdAt: { lt: new Date(now.getTime() - IDEMPOTENCY_TTL_MS) } },
+    });
+    return result.count;
+  }
 
   async claim(
     userId: string,

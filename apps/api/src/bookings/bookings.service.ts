@@ -20,6 +20,7 @@ import {
   DISTANCE_SERVICE,
   type DistanceService,
 } from '../fares/distance.service.js';
+import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertScheduledAt } from './booking-schedule.js';
 import {
@@ -67,6 +68,7 @@ export class BookingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly state: BookingStateService,
+    private readonly fleet: FleetStateService,
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
@@ -125,7 +127,7 @@ export class BookingsService {
     const actor = { type: 'STAFF' as const, userId: user.userId };
     const openedAt = new Date(Date.now() - 1);
 
-    const booking = await this.insertBooking({
+    const inserted = await this.insertBooking({
       dto,
       user,
       branchId: branch.id,
@@ -141,14 +143,11 @@ export class BookingsService {
       actor,
     });
 
-    if (initial === 'CREATED') {
-      this.events.emit('booking.status_changed', {
-        bookingId: booking.id,
-        from: 'CREATED' as const,
-        to: 'SEARCHING_DRIVER' as const,
-      });
+    await this.events.emitAsync('booking.created', this.queuePayload(inserted.booking));
+    if (inserted.opened) {
+      await this.events.emitAsync('booking.status_changed', inserted.opened);
     }
-    return booking;
+    return inserted.booking;
   }
 
   async findAll(user: AuthUser, query: BookingQuery) {
@@ -246,6 +245,7 @@ export class BookingsService {
           );
         }
         const driver = await this.requireAssignableDriver(tx, dto, booking);
+        await this.fleet.assertAvailableForAssign(driver.id);
         published.push(
           await this.state.transition(booking.id, 'DRIVER_ASSIGNED', actor, {
             tx,
@@ -270,7 +270,7 @@ export class BookingsService {
       .catch(rethrowAssignmentConflict);
 
     for (const event of events) {
-      this.events.emit('booking.status_changed', event);
+      await this.events.emitAsync('booking.status_changed', event);
     }
     return this.findOne(id, user);
   }
@@ -399,20 +399,19 @@ export class BookingsService {
               createdAt: input.openedAt,
             },
           });
-          // Scheduled bookings stay SCHEDULED. Releasing them the configured
-          // lead time before pickup waits for a BullMQ job once Redis is running.
-          if (input.initial === 'CREATED') {
-            await this.state.transition(
-              created.id,
-              'SEARCHING_DRIVER',
-              input.actor,
-              { tx },
-            );
-          }
-          return tx.booking.findUniqueOrThrow({
+          // Scheduled bookings stay SCHEDULED. The delayed release into searching
+          // lands on Day 6, because it triggers matching.
+          const opened =
+            input.initial === 'CREATED'
+              ? await this.state.transition(created.id, 'SEARCHING_DRIVER', input.actor, {
+                  tx,
+                })
+              : null;
+          const booking = await tx.booking.findUniqueOrThrow({
             where: { id: created.id },
             include: detailInclude,
           });
+          return { booking, opened };
         });
       } catch (error) {
         if (attempt < 4 && isTrackingCollision(error)) continue;
@@ -422,11 +421,36 @@ export class BookingsService {
     throw new InternalServerErrorException('Could not allocate a tracking id');
   }
 
+  private queuePayload(booking: {
+    id: string;
+    branchId: string;
+    trackingId: string;
+    status: BookingStatus;
+    passengerName: string;
+    scheduledAt: Date | null;
+    quotedFareCents: number;
+    vehicleType: { id: string; name: string };
+    stops: { sequence: number; address: string }[];
+  }) {
+    const pickup = [...booking.stops].sort((left, right) => left.sequence - right.sequence)[0];
+    return {
+      id: booking.id,
+      branchId: booking.branchId,
+      trackingId: booking.trackingId,
+      status: booking.status,
+      passengerName: booking.passengerName,
+      scheduledAt: booking.scheduledAt?.toISOString() ?? null,
+      quotedFareCents: booking.quotedFareCents,
+      vehicleType: { id: booking.vehicleType.id, name: booking.vehicleType.name },
+      pickupAddress: pickup?.address ?? '',
+    };
+  }
+
   private async afterTransition(
     result: { bookingId: string; from: BookingStatus; to: BookingStatus },
     user: AuthUser,
   ) {
-    this.events.emit('booking.status_changed', result);
+    await this.events.emitAsync('booking.status_changed', result);
     return this.findOne(result.bookingId, user);
   }
 

@@ -5,12 +5,23 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
 import argon2 from 'argon2';
+import type { Redis } from 'ioredis';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
+import { grantLocationConsent } from './location-consent.js';
 import { calcFare } from '../src/fares/calc-fare.js';
 import { HaversineDistanceService } from '../src/fares/distance.service.js';
+import { FleetStateService } from '../src/fleet/fleet-state.service.js';
 import { TRACKING_ALPHABET } from '../src/bookings/tracking-id.js';
+import { REDIS } from '../src/redis/redis.constants.js';
+import {
+  driverKey,
+  geoAvailableKey,
+  onlineKey,
+  presenceKey,
+  sessionKey,
+} from '../src/redis/redis.keys.js';
 
 loadEnvFile();
 
@@ -27,6 +38,7 @@ const via = { lat: origin.lat / 2 + dropoff.lat / 2, lng: 0, address: '150 3 Ave
 
 describe('bookings (e2e)', () => {
   let app: INestApplication<App>;
+  let redis: Redis;
   const userIds: string[] = [];
   const branchIds: string[] = [];
   let homeBranchId: string;
@@ -65,6 +77,7 @@ describe('bookings (e2e)', () => {
       }),
     );
     await app.init();
+    redis = app.get(REDIS);
 
     const home = await prisma.branch.create({
       data: { name: `E2E Book ${stamp}`, city: 'Lethbridge', gstRateBps: 500 },
@@ -160,6 +173,9 @@ describe('bookings (e2e)', () => {
     minivanTypeId = minivanType.id;
     const minivan = await createApprovedDriver('Mina', 'Van', false, minivanType.id);
     minivanDriverId = minivan.driverId;
+    await goOnline(driverUser.id, driverId, vehicleId);
+    await goOnline(eligible.userId, eligible.driverId, eligible.vehicleId);
+    await goOnline(minivan.userId, minivan.driverId, minivan.vehicleId);
 
     passengerPhone = nextPhone();
     const passengerUser = await prisma.user.create({
@@ -224,6 +240,19 @@ describe('bookings (e2e)', () => {
       });
     }
     await prisma.idempotencyKey.deleteMany({ where: { userId: { in: userIds } } });
+    await prisma.driverShift.deleteMany({ where: { driverId: { in: driverIds } } });
+    await prisma.document.deleteMany({
+      where: { OR: [{ driverId: { in: driverIds } }, { vehicleId: { in: vehicleIds } }] },
+    });
+    if (redis) {
+      for (const id of driverIds) {
+        await redis.del(driverKey(id), presenceKey(id), sessionKey(id));
+        for (const branchId of branchIds) {
+          await redis.srem(onlineKey(branchId), id);
+          await redis.zrem(geoAvailableKey(branchId), id);
+        }
+      }
+    }
     await prisma.driverVehicleAssignment.deleteMany({
       where: { vehicleId: { in: vehicleIds } },
     });
@@ -448,6 +477,7 @@ describe('bookings (e2e)', () => {
   });
 
   it('assigns and unassigns a driver, and lets only admins force a legal status', async () => {
+    const offline = await createApprovedDriver('Off', 'Line', false);
     const first = await request(app.getHttpServer())
       .post('/api/v1/bookings')
       .set('Authorization', `Bearer ${dispatchToken}`)
@@ -467,6 +497,13 @@ describe('bookings (e2e)', () => {
       .send({ driverId })
       .expect(403);
 
+    const refused = await request(app.getHttpServer())
+      .post(`/api/v1/bookings/${first.body.id}/assign`)
+      .set('Authorization', `Bearer ${dispatchToken}`)
+      .send({ driverId: offline.driverId })
+      .expect(409);
+    expect(refused.body.message).toBe('DRIVER_NOT_AVAILABLE');
+
     const assigned = await request(app.getHttpServer())
       .post(`/api/v1/bookings/${first.body.id}/assign`)
       .set('Authorization', `Bearer ${dispatchToken}`)
@@ -483,7 +520,7 @@ describe('bookings (e2e)', () => {
       .set('Authorization', `Bearer ${dispatchToken}`)
       .send({ driverId })
       .expect(409);
-    expect(busy.body.message).toBe('Driver is busy');
+    expect(busy.body.message).toBe('DRIVER_NOT_AVAILABLE');
 
     const released = await request(app.getHttpServer())
       .post(`/api/v1/bookings/${first.body.id}/unassign`)
@@ -593,11 +630,12 @@ describe('bookings (e2e)', () => {
       .set('Idempotency-Key', `reassign-${stamp}`)
       .send(body())
       .expect(201);
-    await request(app.getHttpServer())
+    const stillOut = await request(app.getHttpServer())
       .post(`/api/v1/bookings/${ride.body.id}/assign`)
       .set('Authorization', `Bearer ${dispatchToken}`)
       .send({ driverId: eligibleDriverId })
       .expect(409);
+    expect(stillOut.body.message).toBe('DRIVER_NOT_AVAILABLE');
 
     await request(app.getHttpServer())
       .post(`/api/v1/bookings/${ladyBooking.body.id}/unassign`)
@@ -648,6 +686,10 @@ describe('bookings (e2e)', () => {
       .send({ driverId })
       .expect(200);
 
+    await prisma.booking.update({
+      where: { id: created.body.id },
+      data: { status: 'DRIVER_ARRIVED' },
+    });
     const [left, right] = await Promise.all([
       request(app.getHttpServer())
         .post(`/api/v1/bookings/${created.body.id}/status`)
@@ -656,7 +698,7 @@ describe('bookings (e2e)', () => {
       request(app.getHttpServer())
         .post(`/api/v1/bookings/${created.body.id}/status`)
         .set('Authorization', `Bearer ${superToken}`)
-        .send({ to: 'SEARCHING_DRIVER' }),
+        .send({ to: 'TRIP_STARTED' }),
     ]);
     expect([left.status, right.status].sort()).toEqual([200, 409]);
     const loser = left.status === 409 ? left : right;
@@ -738,7 +780,29 @@ describe('bookings (e2e)', () => {
     await prisma.driverVehicleAssignment.create({
       data: { driverId: id, vehicleId: fleetVehicle.id },
     });
-    return { driverId: id, vehicleId: fleetVehicle.id };
+    return { driverId: id, vehicleId: fleetVehicle.id, userId: user.id };
+  }
+
+  async function goOnline(userId: string, id: string, assignedVehicleId: string) {
+    const required = await prisma.documentType.findMany({ where: { required: true } });
+    for (const documentType of required) {
+      await prisma.document.create({
+        data: {
+          documentTypeId: documentType.id,
+          driverId: documentType.owner === 'DRIVER' ? id : null,
+          vehicleId: documentType.owner === 'VEHICLE' ? assignedVehicleId : null,
+          storageKey: `e2e/book/${stamp}/${id}/${documentType.code}`,
+          status: 'APPROVED',
+          expiresAt: new Date('2030-01-01T00:00:00.000Z'),
+          reviewedAt: new Date(),
+        },
+      });
+    }
+    await grantLocationConsent(prisma, id);
+    await app.get(FleetStateService).startShift(
+      { userId, role: 'driver', branchId: homeBranchId },
+      assignedVehicleId,
+    );
   }
 
   async function role(name: string) {

@@ -135,12 +135,15 @@ model Driver {
   approvedAt       DateTime?
   approvedById     String?
   suspensionReason String?
+  presenceVersion  Int                   @default(0)
   ratingAvg    Decimal                   @default(0) @db.Decimal(3, 2)
   ratingCount  Int                       @default(0)
   createdAt    DateTime                  @default(now())
   assignments  DriverVehicleAssignment[]
   documents    Document[]
   bookings     Booking[]
+  shifts       DriverShift[]
+  locationConsents DriverLocationConsent[]
 
   @@index([branchId, status])
 }
@@ -156,6 +159,70 @@ model DriverVehicleAssignment {
 
   @@index([driverId, endedAt])
   @@index([vehicleId, endedAt])
+}
+
+enum ShiftEndReason {
+  MANUAL
+  CONNECTION_LOST
+  ADMIN_FORCED
+  SYSTEM
+}
+
+model DriverShift {
+  id        String          @id @default(uuid())
+  driverId  String
+  driver    Driver          @relation(fields: [driverId], references: [id])
+  vehicleId String
+  branchId  String
+  startedAt DateTime        @default(now())
+  endedAt   DateTime?
+  endReason ShiftEndReason?
+  endedById String?
+  endNote   String?
+
+  @@index([driverId, startedAt])
+  @@index([branchId, startedAt])
+}
+
+model DriverLocationLog {
+  id         BigInt   @id @default(autoincrement())
+  driverId   String
+  bookingId  String?
+  lat        Float
+  lng        Float
+  speedMps   Float?
+  heading    Float?
+  accuracyM  Float?
+  recordedAt DateTime
+
+  @@index([driverId, recordedAt])
+  @@index([bookingId, recordedAt])
+  @@index([recordedAt])
+}
+
+/// Acceptance of the driver location notice. Collection starts only after this, and only on shift.
+model DriverLocationConsent {
+  id            String   @id @default(uuid())
+  driverId      String
+  driver        Driver   @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  noticeVersion String
+  acceptedAt    DateTime @default(now())
+
+  @@unique([driverId, noticeVersion])
+}
+
+/// One row each time a branch or super admin reads location history.
+model LocationAccessLog {
+  id          String    @id @default(uuid())
+  actorUserId String
+  driverId    String
+  branchId    String
+  from        DateTime
+  to          DateTime
+  createdAt   DateTime  @default(now())
+
+  @@index([driverId, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
 model Passenger {

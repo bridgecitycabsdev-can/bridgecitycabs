@@ -16,8 +16,11 @@ import {
 
 export type BookingTransitionResult = {
   bookingId: string;
+  branchId: string;
   from: BookingStatus;
   to: BookingStatus;
+  prevDriverId: string | null;
+  driverId: string | null;
 };
 
 @Injectable()
@@ -48,6 +51,8 @@ export class BookingStateService {
       }
       if (!allowed.includes(actor.type)) throw new ForbiddenException();
 
+      const prevDriverId = b.driverId;
+      const driverId = resultingDriverId(prevDriverId, b.status, to, opts.patch);
       const res = await tx.booking.updateMany({
         where: { id: b.id, status: b.status, version: b.version },
         data: {
@@ -71,13 +76,30 @@ export class BookingStateService {
           metadata: opts.metadata,
         },
       });
-      return { bookingId: b.id, from: b.status, to };
+      return { bookingId: b.id, branchId: b.branchId, from: b.status, to, prevDriverId, driverId };
     };
 
     const result = opts.tx
       ? await run(opts.tx)
       : await this.prisma.$transaction(run);
-    if (!opts.tx) this.events.emit('booking.status_changed', result);
+    if (!opts.tx) await this.events.emitAsync('booking.status_changed', result);
     return result;
   }
+}
+
+function resultingDriverId(
+  current: string | null,
+  from: BookingStatus,
+  to: BookingStatus,
+  patch?: Prisma.BookingUncheckedUpdateManyInput,
+) {
+  if (patch && Object.prototype.hasOwnProperty.call(patch, 'driverId')) {
+    const value = patch.driverId;
+    if (typeof value === 'string' || value === null) return value;
+    if (value && typeof value === 'object' && 'set' in value) {
+      return typeof value.set === 'string' ? value.set : null;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(driverRelease(from, to), 'driverId')) return null;
+  return current;
 }

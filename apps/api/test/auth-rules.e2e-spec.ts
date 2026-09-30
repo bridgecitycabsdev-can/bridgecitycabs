@@ -7,6 +7,7 @@ import argon2 from 'argon2';
 import request from 'supertest';
 import { App } from 'supertest/types.js';
 import { AppModule } from '../src/app.module.js';
+import { flushRedisPrefix } from './flush-redis-guards.js';
 
 loadEnvFile();
 
@@ -143,6 +144,7 @@ describe('login throttling (e2e)', () => {
   let app: INestApplication<App>;
 
   beforeAll(async () => {
+    await flushRedisPrefix('throttle:');
     app = await createApp();
   });
 

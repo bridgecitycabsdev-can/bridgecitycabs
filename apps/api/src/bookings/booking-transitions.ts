@@ -50,6 +50,15 @@ export const TRANSITIONS: Partial<Record<BookingStatus, Map>> = {
   // CLOSED and CANCELLED are terminal
 };
 
+/** Statuses covered by one_active_booking_per_driver. */
+export const LIVE_BOOKING_STATUSES = [
+  'MATCHED',
+  'DRIVER_ASSIGNED',
+  'DRIVER_ARRIVING',
+  'DRIVER_ARRIVED',
+  'TRIP_STARTED',
+] as const satisfies readonly BookingStatus[];
+
 const ASSIGNED_STATUSES: readonly BookingStatus[] = [
   'MATCHED',
   'DRIVER_ASSIGNED',

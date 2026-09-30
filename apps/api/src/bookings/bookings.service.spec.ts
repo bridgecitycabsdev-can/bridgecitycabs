@@ -32,7 +32,13 @@ describe('BookingsService tracking id', () => {
   const saved = {
     id: 'booking-1',
     trackingId: 'BC-UNIQUE01',
-    status: 'SEARCHING_DRIVER',
+    status: 'SEARCHING_DRIVER' as const,
+    branchId: 'branch-1',
+    passengerName: 'Walk-up Rider',
+    scheduledAt: null,
+    quotedFareCents: 919,
+    vehicleType: { id: dto.vehicleTypeId, name: 'SUV' },
+    stops: [{ sequence: 1, address: '100 1 Ave S' }],
   };
 
   function build() {
@@ -69,14 +75,16 @@ describe('BookingsService tracking id', () => {
         to: 'SEARCHING_DRIVER',
       })),
     };
+    const events = { emit: vi.fn(), emitAsync: vi.fn(async () => []) };
     const service = new BookingsService(
       prisma as never,
       state as never,
+      { assertAvailableForAssign: vi.fn() } as never,
       { get: () => undefined } as never,
-      { emit: vi.fn() } as never,
+      events as never,
       { estimate: async () => ({ meters: 1300, seconds: 117 }) } as never,
     );
-    return { service, tx, state };
+    return { service, tx, state, events };
   }
 
   let ctx: ReturnType<typeof build>;
@@ -97,6 +105,21 @@ describe('BookingsService tracking id', () => {
     const booking = await ctx.service.create(dto, user);
 
     expect(booking).toBe(saved);
+    expect(ctx.events.emitAsync).toHaveBeenCalledWith('booking.created', {
+      id: 'booking-1',
+      branchId: 'branch-1',
+      trackingId: 'BC-UNIQUE01',
+      status: 'SEARCHING_DRIVER',
+      passengerName: 'Walk-up Rider',
+      scheduledAt: null,
+      quotedFareCents: 919,
+      vehicleType: { id: dto.vehicleTypeId, name: 'SUV' },
+      pickupAddress: '100 1 Ave S',
+    });
+    expect(ctx.events.emitAsync).toHaveBeenCalledWith(
+      'booking.status_changed',
+      expect.objectContaining({ bookingId: 'booking-1', to: 'SEARCHING_DRIVER' }),
+    );
     expect(ids.newTrackingId).toHaveBeenCalledTimes(2);
     expect(ctx.tx.booking.create).toHaveBeenCalledTimes(2);
     expect(ctx.state.transition).toHaveBeenCalledTimes(1);

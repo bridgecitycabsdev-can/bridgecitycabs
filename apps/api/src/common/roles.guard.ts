@@ -21,6 +21,9 @@ export class RolesGuard implements CanActivate {
     if (isPublic) {
       return true;
     }
+    if (context.getType() !== 'http') {
+      return true;
+    }
 
     const roles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
       context.getHandler(),

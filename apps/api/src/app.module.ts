@@ -9,6 +9,12 @@ import { JwtAuthGuard } from './common/jwt-auth.guard.js';
 import { RolesGuard } from './common/roles.guard.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { BranchesModule } from './branches/branches.module.js';
+import { CatalogModule } from './catalog/catalog.module.js';
+import { AssignmentsModule } from './assignments/assignments.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
+import { DriversModule } from './drivers/drivers.module.js';
+import { PassengersModule } from './passengers/passengers.module.js';
+import { VehiclesModule } from './vehicles/vehicles.module.js';
 
 @Module({
   imports: [
@@ -19,6 +25,12 @@ import { BranchesModule } from './branches/branches.module.js';
     PrismaModule,
     AuthModule,
     BranchesModule,
+    CatalogModule,
+    VehiclesModule,
+    DriversModule,
+    AssignmentsModule,
+    DocumentsModule,
+    PassengersModule,
   ],
   controllers: [AppController],
   providers: [

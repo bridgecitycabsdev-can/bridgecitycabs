@@ -8,12 +8,14 @@ datasource db {
 }
 
 model Branch {
-  id        String   @id @default(uuid())
+  id        String    @id @default(uuid())
   name      String
   city      String
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  active    Boolean   @default(true)
+  createdAt DateTime  @default(now())
   users     User[]
+  vehicles  Vehicle[]
+  drivers   Driver[]
 }
 
 model Role {
@@ -36,6 +38,161 @@ model User {
   lastLoginAt   DateTime?
   createdAt     DateTime       @default(now())
   refreshTokens RefreshToken[]
+  driver        Driver?
+  passenger     Passenger?
+}
+
+enum DriverStatus {
+  PENDING_DOCUMENTS
+  PENDING_APPROVAL
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum DocumentOwner {
+  DRIVER
+  VEHICLE
+}
+
+model VehicleType {
+  id       String         @id @default(uuid())
+  name     String         @unique // Sedan, SUV, Minivan, Luxury
+  active   Boolean        @default(true)
+  models   VehicleModel[]
+  vehicles Vehicle[]
+}
+
+model VehicleMake {
+  id     String         @id @default(uuid())
+  name   String         @unique
+  models VehicleModel[]
+}
+
+model VehicleModel {
+  id            String      @id @default(uuid())
+  makeId        String
+  make          VehicleMake @relation(fields: [makeId], references: [id])
+  vehicleTypeId String
+  vehicleType   VehicleType @relation(fields: [vehicleTypeId], references: [id])
+  name          String
+  bodyType      String?
+  vehicles      Vehicle[]
+
+  @@unique([makeId, name])
+}
+
+model Vehicle {
+  id            String                    @id @default(uuid())
+  legacyId      Int?                      @unique
+  branchId      String
+  branch        Branch                    @relation(fields: [branchId], references: [id])
+  modelId       String
+  model         VehicleModel              @relation(fields: [modelId], references: [id])
+  vehicleTypeId String
+  vehicleType   VehicleType               @relation(fields: [vehicleTypeId], references: [id])
+  plateNumber   String
+  unitNumber    String? // taxi fleet unit number (dispatch shows "111", "123")
+  year          Int
+  color         String?
+  seats         Int                       @default(4)
+  active        Boolean                   @default(true)
+  createdAt     DateTime                  @default(now())
+  assignments   DriverVehicleAssignment[]
+  documents     Document[]
+
+  @@unique([branchId, plateNumber])
+  @@index([branchId])
+}
+
+model Driver {
+  id           String                    @id @default(uuid())
+  legacyId     Int?                      @unique
+  userId       String                    @unique
+  user         User                      @relation(fields: [userId], references: [id])
+  branchId     String
+  branch       Branch                    @relation(fields: [branchId], references: [id])
+  firstName    String
+  lastName     String
+  phone        String
+  status           DriverStatus              @default(PENDING_DOCUMENTS)
+  approvedAt       DateTime?
+  approvedById     String?
+  suspensionReason String?
+  ratingAvg    Decimal                   @default(0) @db.Decimal(3, 2)
+  ratingCount  Int                       @default(0)
+  createdAt    DateTime                  @default(now())
+  assignments  DriverVehicleAssignment[]
+  documents    Document[]
+
+  @@index([branchId, status])
+}
+
+model DriverVehicleAssignment {
+  id        String    @id @default(uuid())
+  driverId  String
+  driver    Driver    @relation(fields: [driverId], references: [id])
+  vehicleId String
+  vehicle   Vehicle   @relation(fields: [vehicleId], references: [id])
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+
+  @@index([driverId, endedAt])
+  @@index([vehicleId, endedAt])
+}
+
+model Passenger {
+  id            String    @id @default(uuid())
+  legacyId      Int?      @unique
+  userId        String    @unique
+  user          User      @relation(fields: [userId], references: [id])
+  firstName     String
+  lastName      String?
+  phone         String
+  email         String?
+  createdAt     DateTime  @default(now())
+  blocked       Boolean   @default(false)
+  blockReason   String?
+  blockedAt     DateTime?
+  unblockReason String?
+}
+
+model DocumentType {
+  id        String        @id @default(uuid())
+  code      String        @unique // AB_DRIVERS_LICENCE, POLICE_CHECK_VSC, WORK_ELIGIBILITY, VEHICLE_REGISTRATION, VEHICLE_INSURANCE, TAXI_INSPECTION
+  name      String
+  owner     DocumentOwner
+  required  Boolean       @default(true)
+  hasExpiry Boolean       @default(true)
+  documents Document[]
+}
+
+model Document {
+  id             String         @id @default(uuid())
+  documentTypeId String
+  documentType   DocumentType   @relation(fields: [documentTypeId], references: [id])
+  driverId       String?
+  driver         Driver?        @relation(fields: [driverId], references: [id])
+  vehicleId      String?
+  vehicle        Vehicle?       @relation(fields: [vehicleId], references: [id])
+  storageKey     String // R2 object key, never a public URL
+  status         DocumentStatus @default(PENDING)
+  expiresAt      DateTime?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  rejectionNote  String?
+  createdAt      DateTime       @default(now())
+
+  @@index([driverId])
+  @@index([vehicleId])
+  @@index([expiresAt])
 }
 
 model Permission {

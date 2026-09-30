@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import type { AuthUser } from '../common/auth-user.js';
+import { branchWhere } from '../common/branch-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CreateBranchDto } from './dto/create-branch.dto.js';
 import { UpdateBranchDto } from './dto/update-branch.dto.js';
@@ -20,17 +21,19 @@ export class BranchesService {
   }
 
   async findAll(user: AuthUser) {
+    const scope = branchWhere(user);
     if (user.role === 'super_admin') {
       return this.prisma.branch.findMany();
     }
-    if (!user.branchId) {
+    if (!scope.branchId) {
       return [];
     }
-    return this.prisma.branch.findMany({ where: { id: user.branchId } });
+    return this.prisma.branch.findMany({ where: { id: scope.branchId } });
   }
 
   async findOne(id: string, user: AuthUser) {
-    if (user.role !== 'super_admin' && user.branchId !== id) {
+    const scope = branchWhere(user, id);
+    if (user.role !== 'super_admin' && scope.branchId !== id) {
       throw new ForbiddenException();
     }
     const branch = await this.prisma.branch.findUnique({ where: { id } });

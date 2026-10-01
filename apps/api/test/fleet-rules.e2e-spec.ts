@@ -37,15 +37,30 @@ describe('fleet rules (e2e)', () => {
   let homeDriverId: string;
 
   beforeAll(async () => {
-    await prisma.user
-      .findUnique({ where: { phone: '+14035550100' } })
-      .then(async (existing) => {
-        if (!existing) return;
-        await prisma.driver.deleteMany({ where: { userId: existing.id } });
-        await prisma.passenger.deleteMany({ where: { userId: existing.id } });
-        await prisma.refreshToken.deleteMany({ where: { userId: existing.id } });
-        await prisma.user.delete({ where: { id: existing.id } });
+    const existing = await prisma.user.findUnique({
+      where: { phone: '+14035550100' },
+      include: { driver: { select: { id: true } } },
+    });
+    if (existing?.driver) {
+      const driverId = existing.driver.id;
+      await prisma.driverVehicleAssignment.deleteMany({ where: { driverId } });
+      await prisma.document.deleteMany({ where: { driverId } });
+      await prisma.driverLocationLog.deleteMany({ where: { driverId } });
+      await prisma.locationAccessLog.deleteMany({ where: { driverId } });
+      await prisma.bookingOffer.deleteMany({ where: { driverId } });
+      await prisma.bookingAssignment.deleteMany({ where: { driverId } });
+      await prisma.driverShift.deleteMany({ where: { driverId } });
+      await prisma.booking.updateMany({
+        where: { driverId },
+        data: { driverId: null, vehicleId: null },
       });
+      await prisma.driver.delete({ where: { id: driverId } });
+    }
+    if (existing) {
+      await prisma.passenger.deleteMany({ where: { userId: existing.id } });
+      await prisma.refreshToken.deleteMany({ where: { userId: existing.id } });
+      await prisma.user.delete({ where: { id: existing.id } });
+    }
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -127,7 +142,7 @@ describe('fleet rules (e2e)', () => {
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await prisma.branch.deleteMany({ where: { id: { in: branchIds } } });
     await prisma.$disconnect();
-    await app.close();
+    if (app) await app.close();
   });
 
   it('keeps a branch admin inside their own drivers', async () => {

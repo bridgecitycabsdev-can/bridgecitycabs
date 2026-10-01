@@ -16,6 +16,7 @@ import { STAFF_ROLES } from '../common/staff-roles.js';
 import { Idempotent } from '../idempotency/idempotency.decorator.js';
 import { BookingsService } from './bookings.service.js';
 import { AssignBookingDto } from './dto/assign-booking.dto.js';
+import { DispatchModeDto } from './dto/dispatch-mode.dto.js';
 import { BookingQuery } from './dto/booking-query.dto.js';
 import { BookingStatusDto } from './dto/booking-status.dto.js';
 import { CancelBookingDto } from './dto/cancel-booking.dto.js';
@@ -51,6 +52,17 @@ export class BookingsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.bookings.findOne(id, user);
+  }
+
+  @Post(':id/dispatch-mode')
+  @HttpCode(HttpStatus.OK)
+  @Roles('dispatcher', 'branch_admin', 'super_admin')
+  dispatchMode(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: DispatchModeDto,
+  ) {
+    return this.bookings.setDispatchMode(id, dto, user);
   }
 
   @Post(':id/assign')

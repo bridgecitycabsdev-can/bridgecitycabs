@@ -14,8 +14,11 @@ model Branch {
   active     Boolean    @default(true)
   timezone   String     @default("America/Edmonton")
   currency   String     @default("CAD")
-  gstRateBps Int        @default(500)
-  createdAt  DateTime   @default(now())
+  gstRateBps          Int       @default(500)
+  autoDispatchDefault Boolean   @default(false)
+  offerTimeoutSeconds Int       @default(15)
+  searchWindowSeconds Int       @default(120)
+  createdAt           DateTime  @default(now())
   users      User[]
   vehicles   Vehicle[]
   drivers    Driver[]
@@ -43,6 +46,7 @@ model User {
   lastLoginAt   DateTime?
   createdAt     DateTime       @default(now())
   refreshTokens RefreshToken[]
+  deviceTokens  DeviceToken[]
   driver        Driver?
   passenger     Passenger?
 }
@@ -115,6 +119,7 @@ model Vehicle {
   assignments   DriverVehicleAssignment[]
   documents     Document[]
   bookings      Booking[]
+  offers        BookingOffer[]
 
   @@unique([branchId, plateNumber])
   @@index([branchId])
@@ -142,6 +147,7 @@ model Driver {
   assignments  DriverVehicleAssignment[]
   documents    Document[]
   bookings     Booking[]
+  offers       BookingOffer[]
   shifts       DriverShift[]
   locationConsents DriverLocationConsent[]
 
@@ -358,6 +364,19 @@ enum AssignMethod {
   AUTO
 }
 
+enum AssignMode {
+  AUTO
+  MANUAL
+}
+
+enum OfferStatus {
+  OFFERED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  CANCELLED
+}
+
 enum AssignEndReason {
   REASSIGNED
   DRIVER_CANCELLED
@@ -401,7 +420,9 @@ model Booking {
   branch               Branch        @relation(fields: [branchId], references: [id])
   source               BookingSource
   status               BookingStatus @default(CREATED)
-  passengerId          String?
+  assignMode           AssignMode    @default(AUTO)
+  searchStartedAt      DateTime?
+  passengerId          String? // partial unique: one booking that is not CANCELLED or CLOSED
   passenger            Passenger?    @relation(fields: [passengerId], references: [id])
   passengerName        String // snapshot: phone-in customers may have no account
   passengerPhone       String
@@ -440,6 +461,7 @@ model Booking {
   stops                BookingStop[]
   history              BookingStatusHistory[]
   assignments          BookingAssignment[]
+  offers               BookingOffer[]
 
   @@index([branchId, status, createdAt])
   @@index([driverId, status])
@@ -490,6 +512,39 @@ model BookingAssignment {
   endReason    AssignEndReason?
 
   @@index([driverId, assignedAt])
+}
+
+model BookingOffer {
+  id                String      @id @default(uuid())
+  bookingId         String
+  booking           Booking     @relation(fields: [bookingId], references: [id])
+  driverId          String
+  driver            Driver      @relation(fields: [driverId], references: [id])
+  vehicleId         String
+  vehicle           Vehicle     @relation(fields: [vehicleId], references: [id])
+  attempt           Int
+  status            OfferStatus @default(OFFERED)
+  distanceToPickupM Int
+  offeredAt         DateTime    @default(now())
+  expiresAt         DateTime
+  respondedAt       DateTime?
+  declineReason     String?
+
+  @@index([bookingId, offeredAt])
+  @@index([driverId, offeredAt])
+}
+
+model DeviceToken {
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id])
+  token      String    @unique
+  platform   String // ios | android
+  appVersion String?
+  lastSeenAt DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@index([userId])
 }
 
 model IdempotencyKey {

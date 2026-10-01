@@ -15,6 +15,10 @@ export const DRIVER_HASH_FIELDS = {
   name: 'name',
   unit: 'unit',
   vehicleType: 'vehicleType',
+  vehicleId: 'vehicleId',
+  ladyDriverEligible: 'ladyDriverEligible',
+  /** Unix ms when this driver last became AVAILABLE. Ranking uses it. */
+  availableSince: 'availableSince',
   staleSince: 'staleSince',
   /** Last time a point was copied into the location history buffer. */
   histAt: 'histAt',
@@ -42,6 +46,16 @@ export function onlineKey(branchId: string) {
 
 export function geoAvailableKey(branchId: string) {
   return `geo:available:${branchId}`;
+}
+
+/** Hash claim for the driver's open offer: offerId, bookingId, driverId. TTL is the offer timeout. */
+export function offerReserveKey(driverId: string) {
+  return `offer:driver:${driverId}`;
+}
+
+/** Drivers already offered this booking. Expires after an hour. */
+export function offeredDriversKey(bookingId: string) {
+  return `booking:${bookingId}:offered`;
 }
 
 export function sessionKey(driverId: string) {

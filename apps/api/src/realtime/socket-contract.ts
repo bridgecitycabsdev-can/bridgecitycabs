@@ -5,6 +5,8 @@ export {
   authTokenSchema,
   bookingCreatedSchema,
   bookingStatusChangedSchema,
+  passengerBookingSchema,
+  passengerDriverLocationSchema,
   driverHeartbeatSchema,
   driverLocationSchema,
   driverStateSchema,

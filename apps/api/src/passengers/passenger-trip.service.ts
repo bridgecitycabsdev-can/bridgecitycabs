@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { LIVE_BOOKING_STATUSES } from '../bookings/booking-transitions.js';
+import { PASSENGER_SHARE_LOCATION_STATUSES } from './passenger-booking.view.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -22,7 +22,7 @@ export class PassengerTripService {
         id: bookingId,
         passengerId: passenger.id,
         driverId: { not: null },
-        status: { in: [...LIVE_BOOKING_STATUSES] },
+        status: { in: PASSENGER_SHARE_LOCATION_STATUSES },
       },
       select: { driverId: true },
     });

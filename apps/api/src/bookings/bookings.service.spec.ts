@@ -83,6 +83,8 @@ describe('BookingsService tracking id', () => {
       { get: () => undefined } as never,
       events as never,
       { estimate: async () => ({ meters: 1300, seconds: 117 }) } as never,
+      { cancel: async () => undefined } as never,
+      { enqueueAttempt: async () => undefined } as never,
     );
     return { service, tx, state, events };
   }

@@ -9,6 +9,7 @@ import { PassengerTripService } from './passenger-trip.service.js';
 export class PassengerTripController {
   constructor(private readonly trips: PassengerTripService) {}
 
+  /** Latest point for this passenger's own booking. Not a way to follow some other driver. */
   @Get(':id/driver-location')
   driverLocation(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.trips.driverLocation(user, id);

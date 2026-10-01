@@ -60,6 +60,9 @@ export class BookingStateService {
           version: { increment: 1 },
           ...stampFor(to),
           ...driverRelease(b.status, to),
+          ...(to === 'SEARCHING_DRIVER' && !b.searchStartedAt
+            ? { searchStartedAt: new Date() }
+            : {}),
           ...opts.patch,
         },
       });

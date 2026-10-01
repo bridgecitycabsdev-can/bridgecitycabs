@@ -277,6 +277,7 @@ describe('driver shifts (e2e)', () => {
     expect(started.body).toMatchObject({
       v: 1,
       status: 'AVAILABLE',
+      offer: null,
       booking: null,
       shift: {
         vehicle: { id: vehicleId, unitNumber: '111', plate: `SH${tail}` },
@@ -295,6 +296,9 @@ describe('driver shifts (e2e)', () => {
     const key = driverKey(driverId);
     expect(await redis.hget(key, DRIVER_HASH_FIELDS.name)).toBe('Priya Nair');
     expect(await redis.hget(key, DRIVER_HASH_FIELDS.unit)).toBe('111');
+    expect(await redis.hget(key, DRIVER_HASH_FIELDS.vehicleId)).toBe(vehicleId);
+    expect(await redis.hget(key, DRIVER_HASH_FIELDS.ladyDriverEligible)).toBe('0');
+    expect(Number(await redis.hget(key, DRIVER_HASH_FIELDS.availableSince))).toBeGreaterThan(0);
     expect(await redis.hget(key, DRIVER_HASH_FIELDS.status)).toBe('AVAILABLE');
     expect(await redis.sismember(onlineKey(homeBranchId), driverId)).toBe(1);
     expect(await redis.ttl(presenceKey(driverId))).toBeGreaterThan(0);

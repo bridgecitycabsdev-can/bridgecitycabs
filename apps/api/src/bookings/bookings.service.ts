@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
@@ -20,7 +21,13 @@ import {
   DISTANCE_SERVICE,
   type DistanceService,
 } from '../fares/distance.service.js';
+import { OFFER_RESOLVED } from '../dispatch/offer-events.js';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
+import { DISPATCH_QUEUE, type DispatchQueue } from '../jobs/dispatch-queue.js';
+import {
+  OFFER_EXPIRY_SCHEDULER,
+  type OfferExpiryScheduler,
+} from '../jobs/offer-expiry.scheduler.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertScheduledAt } from './booking-schedule.js';
 import {
@@ -29,6 +36,7 @@ import {
 } from './booking-state.service.js';
 import { BOOKING_TABS } from './booking-tabs.js';
 import type { AssignBookingDto } from './dto/assign-booking.dto.js';
+import type { DispatchModeDto } from './dto/dispatch-mode.dto.js';
 import type { BookingQuery } from './dto/booking-query.dto.js';
 import type { BookingStatusDto } from './dto/booking-status.dto.js';
 import type { CancelBookingDto } from './dto/cancel-booking.dto.js';
@@ -63,8 +71,26 @@ const detailInclude = {
 
 const SORT_FIELDS = new Set(['createdAt', 'scheduledAt', 'status']);
 
+const MODE_LOCKED: readonly BookingStatus[] = [
+  'TRIP_STARTED',
+  'TRIP_COMPLETED',
+  'PAYMENT_PENDING',
+  'PAYMENT_COMPLETED',
+  'CLOSED',
+  'CANCELLED',
+];
+
+type WithdrawnOffer = {
+  offerId: string;
+  driverId: string;
+  bookingId: string;
+  branchId: string;
+};
+
 @Injectable()
 export class BookingsService {
+  private readonly logger = new Logger(BookingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly state: BookingStateService,
@@ -72,6 +98,8 @@ export class BookingsService {
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
+    @Inject(OFFER_EXPIRY_SCHEDULER) private readonly expiry: OfferExpiryScheduler,
+    @Inject(DISPATCH_QUEUE) private readonly dispatch: DispatchQueue,
   ) {}
 
   async create(dto: CreateBookingDto, user: AuthUser) {
@@ -220,14 +248,27 @@ export class BookingsService {
   async assign(id: string, dto: AssignBookingDto, user: AuthUser) {
     this.assertRole(user, ASSIGN_ROLES);
     const actor = { type: 'STAFF' as const, userId: user.userId };
+    const withdrawn: WithdrawnOffer[] = [];
     const events = await this.prisma
       .$transaction(async (tx) => {
+        withdrawn.length = 0;
         const booking = await this.requireBooking(tx, id, user);
         const published: BookingTransitionResult[] = [];
+        withdrawn.push(...(await this.withdrawOpenOffers(tx, booking)));
+        let status = booking.status;
+        if (status === 'MATCHED') {
+          published.push(
+            await this.state.transition(booking.id, 'SEARCHING_DRIVER', { type: 'SYSTEM' }, {
+              tx,
+              reason: 'Offer cancelled',
+            }),
+          );
+          status = 'SEARCHING_DRIVER';
+        }
         const open = await tx.bookingAssignment.findFirst({
           where: { bookingId: booking.id, endedAt: null },
         });
-        if (open?.driverId === dto.driverId && booking.status === 'DRIVER_ASSIGNED') {
+        if (open?.driverId === dto.driverId && status === 'DRIVER_ASSIGNED') {
           await this.requireAssignableDriver(tx, dto, booking);
           return published;
         }
@@ -237,7 +278,7 @@ export class BookingsService {
             data: { endedAt: new Date(), endReason: 'REASSIGNED' },
           });
         }
-        if (booking.status !== 'SEARCHING_DRIVER') {
+        if (status !== 'SEARCHING_DRIVER') {
           published.push(
             await this.state.transition(booking.id, 'SEARCHING_DRIVER', actor, {
               tx,
@@ -245,7 +286,7 @@ export class BookingsService {
           );
         }
         const driver = await this.requireAssignableDriver(tx, dto, booking);
-        await this.fleet.assertAvailableForAssign(driver.id);
+        await this.fleet.assertAvailableForAssign(driver.id, booking.id);
         published.push(
           await this.state.transition(booking.id, 'DRIVER_ASSIGNED', actor, {
             tx,
@@ -269,8 +310,57 @@ export class BookingsService {
       })
       .catch(rethrowAssignmentConflict);
 
+    await this.finishWithdrawn(withdrawn);
     for (const event of events) {
       await this.events.emitAsync('booking.status_changed', event);
+    }
+    return this.findOne(id, user);
+  }
+
+  async setDispatchMode(id: string, dto: DispatchModeDto, user: AuthUser) {
+    this.assertRole(user, ASSIGN_ROLES);
+    const withdrawn: WithdrawnOffer[] = [];
+    const published: BookingTransitionResult[] = [];
+    let resumeSearch = false;
+    await this.prisma.$transaction(async (tx) => {
+      withdrawn.length = 0;
+      published.length = 0;
+      const booking = await this.requireBooking(tx, id, user);
+      if (MODE_LOCKED.includes(booking.status)) {
+        throw new ConflictException('This booking can no longer change dispatch mode');
+      }
+      if (dto.mode === 'MANUAL') {
+        withdrawn.push(...(await this.withdrawOpenOffers(tx, booking)));
+        if (booking.status === 'MATCHED') {
+          published.push(
+            await this.state.transition(booking.id, 'SEARCHING_DRIVER', { type: 'SYSTEM' }, {
+              tx,
+              reason: 'Dispatch set to manual',
+            }),
+          );
+        }
+      }
+      if (booking.assignMode !== dto.mode) {
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { assignMode: dto.mode },
+        });
+      }
+      resumeSearch = dto.mode === 'AUTO' && booking.status === 'SEARCHING_DRIVER';
+    });
+
+    await this.finishWithdrawn(withdrawn);
+    for (const event of published) {
+      await this.events.emitAsync('booking.status_changed', event);
+    }
+    if (resumeSearch) {
+      const fresh = await this.prisma.booking.findUnique({
+        where: { id },
+        select: { version: true, status: true, assignMode: true },
+      });
+      if (fresh?.assignMode === 'AUTO' && fresh.status === 'SEARCHING_DRIVER') {
+        await this.dispatch.enqueueAttempt(id, fresh.version);
+      }
     }
     return this.findOne(id, user);
   }
@@ -399,8 +489,7 @@ export class BookingsService {
               createdAt: input.openedAt,
             },
           });
-          // Scheduled bookings stay SCHEDULED. The delayed release into searching
-          // lands on Day 6, because it triggers matching.
+          // Scheduled bookings stay SCHEDULED until the release job.
           const opened =
             input.initial === 'CREATED'
               ? await this.state.transition(created.id, 'SEARCHING_DRIVER', input.actor, {
@@ -477,6 +566,66 @@ export class BookingsService {
       where: { bookingId, endedAt: null },
       data: { endedAt: new Date(), endReason },
     });
+  }
+
+  /** Marks every open offer cancelled. Redis release and offer:cancelled happen after commit. */
+  private async withdrawOpenOffers(
+    tx: Prisma.TransactionClient,
+    booking: { id: string; branchId: string },
+  ) {
+    const open = await tx.bookingOffer.findMany({
+      where: { bookingId: booking.id, status: 'OFFERED' },
+      select: { id: true, driverId: true },
+    });
+    const withdrawn: WithdrawnOffer[] = [];
+    for (const offer of open) {
+      const updated = await tx.bookingOffer.updateMany({
+        where: { id: offer.id, status: 'OFFERED' },
+        data: { status: 'CANCELLED', respondedAt: new Date() },
+      });
+      if (updated.count !== 1) continue;
+      withdrawn.push({
+        offerId: offer.id,
+        driverId: offer.driverId,
+        bookingId: booking.id,
+        branchId: booking.branchId,
+      });
+    }
+    return withdrawn;
+  }
+
+  private async finishWithdrawn(offers: WithdrawnOffer[]) {
+    for (const offer of offers) {
+      try {
+        await this.fleet.releaseOffer({
+          branchId: offer.branchId,
+          driverId: offer.driverId,
+          bookingId: offer.bookingId,
+        });
+      } catch (error) {
+        this.logger.warn(
+          `Could not release ${offer.driverId} after cancelling ${offer.offerId}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+      try {
+        await this.expiry.cancel(offer.offerId);
+      } catch (error) {
+        this.logger.warn(
+          `Could not remove expiry for ${offer.offerId}: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+      await this.events.emitAsync(OFFER_RESOLVED, {
+        offerId: offer.offerId,
+        bookingId: offer.bookingId,
+        driverId: offer.driverId,
+        branchId: offer.branchId,
+        outcome: 'CANCELLED',
+      });
+    }
   }
 
   private async requireAssignableDriver(

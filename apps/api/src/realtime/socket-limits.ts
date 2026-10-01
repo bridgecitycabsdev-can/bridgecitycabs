@@ -79,6 +79,19 @@ export class SocketLimits implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /** True when this user has a live socket. A Redis miss is treated as disconnected. */
+  async hasConnection(userId: string) {
+    try {
+      const key = socketConnKey(userId);
+      await this.redis.zremrangebyscore(key, '-inf', String(Date.now()));
+      const count = await this.redis.zcard(key);
+      return count > 0;
+    } catch {
+      this.logger.warn('socket presence unavailable');
+      return false;
+    }
+  }
+
   async allowEvent(userId: string) {
     try {
       const allowed = await this.redis.eval(

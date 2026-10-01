@@ -78,6 +78,7 @@ describe('BookingStateService.transition', () => {
     status: BookingStatus = 'CREATED',
     version = 3,
     driverId: string | null = null,
+    searchStartedAt: Date | null = null,
   ) {
     const booking = {
       id: 'booking-1',
@@ -85,6 +86,7 @@ describe('BookingStateService.transition', () => {
       driverId,
       status,
       version,
+      searchStartedAt,
     };
     const history: Prisma.BookingStatusHistoryUncheckedCreateInput[] = [];
     const updates: Prisma.BookingUpdateManyArgs[] = [];
@@ -367,5 +369,22 @@ describe('BookingStateService.transition', () => {
       driverId: 'driver-b',
       vehicleId: null,
     });
+  });
+
+  it('records searchStartedAt the first time a booking starts looking for a driver', async () => {
+    const { service, updates } = setup('CREATED');
+
+    await service.transition('booking-1', 'SEARCHING_DRIVER', { type: 'STAFF' });
+
+    expect(updates[0]?.data).toMatchObject({ searchStartedAt: expect.any(Date) });
+  });
+
+  it('keeps the original search window when the booking returns to searching', async () => {
+    const started = new Date('2026-10-01T04:00:00.000Z');
+    const { service, updates } = setup('MATCHED', 4, 'driver-1', started);
+
+    await service.transition('booking-1', 'SEARCHING_DRIVER', { type: 'SYSTEM' });
+
+    expect(updates[0]?.data).not.toHaveProperty('searchStartedAt');
   });
 });

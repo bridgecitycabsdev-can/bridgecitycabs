@@ -196,11 +196,12 @@ export class AuthService {
     return this.issueTokens(stored.user);
   }
 
-  async logout(refreshToken: string) {
+  async logout(userId: string, refreshToken: string) {
     await this.prisma.refreshToken.updateMany({
       where: { tokenHash: this.hashToken(refreshToken), revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    await this.prisma.deviceToken.deleteMany({ where: { userId } });
     return { success: true };
   }
 

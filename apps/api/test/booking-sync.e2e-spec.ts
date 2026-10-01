@@ -20,6 +20,7 @@ import {
   DRIVER_HASH_FIELDS,
   driverKey,
   geoAvailableKey,
+  offerReserveKey,
   onlineKey,
   presenceKey,
   sessionKey,
@@ -147,6 +148,7 @@ describe('booking fleet sync (e2e)', () => {
           'ALTER TABLE "BookingStatusHistory" DISABLE TRIGGER booking_history_immutable',
         );
         await tx.bookingStatusHistory.deleteMany({ where: { bookingId: { in: ids } } });
+        await tx.bookingOffer.deleteMany({ where: { bookingId: { in: ids } } });
         await tx.bookingAssignment.deleteMany({ where: { bookingId: { in: ids } } });
         await tx.booking.deleteMany({ where: { id: { in: ids } } });
         await tx.$executeRawUnsafe(
@@ -156,7 +158,7 @@ describe('booking fleet sync (e2e)', () => {
     }
     for (const id of [driverId, otherDriverId]) {
       if (!id || !redis) continue;
-      await redis.del(driverKey(id), presenceKey(id), sessionKey(id));
+      await redis.del(driverKey(id), presenceKey(id), sessionKey(id), offerReserveKey(id));
       await redis.srem(onlineKey(homeBranchId), id);
       await redis.zrem(geoAvailableKey(homeBranchId), id);
       await prisma.driverShift.deleteMany({ where: { driverId: id } });
@@ -377,6 +379,84 @@ describe('booking fleet sync (e2e)', () => {
     expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.staleSince)).toBeTruthy();
     expect(await position()).toBeNull();
     expect(await redis.sismember(onlineKey(homeBranchId), driverId)).toBe(1);
+  });
+
+  it('keeps a live offer on reconnect and expires it when the reservation key is gone', async () => {
+    await fleet.updateLocation(driverId, { ...lethbridge, accuracyM: 8 });
+    const bookingId = await insertBooking('BC-SY5' + tail);
+    await prisma.bookingStop.create({
+      data: {
+        bookingId,
+        sequence: 2,
+        type: 'DROPOFF',
+        address: 'Airport',
+        lat: 49.63,
+        lng: -112.8,
+      },
+    });
+    await redis.set(offerReserveKey(driverId), 'pending');
+    await bookings.transition(
+      bookingId,
+      'MATCHED',
+      { type: 'SYSTEM' },
+      { patch: { driverId, vehicleId } },
+    );
+    const expiresAt = new Date(Date.now() + 12_000);
+    const offer = await prisma.bookingOffer.create({
+      data: {
+        bookingId,
+        driverId,
+        vehicleId,
+        attempt: 1,
+        distanceToPickupM: 640,
+        expiresAt,
+      },
+    });
+    await redis.set(offerReserveKey(driverId), offer.id);
+
+    expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.status)).toBe('OFFERED');
+    expect(await position()).toBeNull();
+
+    await reconciler.sweep();
+    expect((await prisma.bookingOffer.findUnique({ where: { id: offer.id } }))?.status).toBe(
+      'OFFERED',
+    );
+
+    const state = await fleet.state({
+      userId: driverUserId,
+      role: 'driver',
+      branchId: homeBranchId,
+    });
+    expect(state.status).toBe('OFFERED');
+    expect(state.offer).toMatchObject({
+      id: offer.id,
+      distanceToPickupM: 640,
+      tripDistanceM: 1200,
+      quotedFareCents: 2500,
+      passengerFirstName: 'Leila',
+      notes: null,
+      pickup: { address: 'City Hall', lat: lethbridge.lat, lng: lethbridge.lng },
+      dropoff: { address: 'Airport', lat: 49.63, lng: -112.8 },
+    });
+    const remaining =
+      Date.parse(state.offer?.expiresAt ?? '') - Date.parse(state.offer?.serverNow ?? '');
+    expect(remaining).toBeGreaterThan(0);
+    expect(remaining).toBeLessThanOrEqual(12_000);
+
+    await redis.del(offerReserveKey(driverId));
+    await reconciler.sweep();
+
+    expect((await prisma.bookingOffer.findUnique({ where: { id: offer.id } }))?.status).toBe(
+      'EXPIRED',
+    );
+    const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
+    expect(booking?.status).toBe('SEARCHING_DRIVER');
+    expect(booking?.driverId).toBeNull();
+    expect(booking?.vehicleId).toBeNull();
+    expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.status)).toBe('AVAILABLE');
+    expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.bookingId)).toBeNull();
+    expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.availableSince)).toBeTruthy();
+    expect(await position()).not.toBeNull();
   });
 
   async function assign(bookingId: string) {

@@ -31,6 +31,8 @@ for (const event of [
   SOCKET_EVENTS.fleetDriverUpdated,
   SOCKET_EVENTS.bookingCreated,
   SOCKET_EVENTS.bookingStatusChanged,
+  SOCKET_EVENTS.offerCreated,
+  SOCKET_EVENTS.offerResolved,
 ]) {
   socket.on(event, (payload) => {
     console.log(`${event} ${JSON.stringify(payload)}`);

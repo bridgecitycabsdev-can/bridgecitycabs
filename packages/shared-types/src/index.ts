@@ -4,9 +4,12 @@ import { z } from 'zod';
  * Socket contract shared by the API and the React apps.
  * Flutter clients mirror these JSON shapes.
  *
- * Telemetry (client → server): driver:location, driver:heartbeat.
- * Pushes (server → client): driver:state, session:replaced, booking:status_changed.
+ * Telemetry (client → server): driver:location, driver:heartbeat, offer:received.
+ * Driver pushes: driver:state, offer:new, offer:cancelled, offer:expired.
+ * Dispatch pushes: booking:created, booking:status_changed, offer:created, offer:resolved.
+ * Passenger pushes: trip:update. A disconnected passenger app gets the same facts as a push.
  * driver:state is a full snapshot. Clients keep the highest version.
+ * offer:new carries the offer card. The lock-screen push does not.
  */
 
 export const DRIVER_PRESENCE_STATES = [
@@ -75,6 +78,33 @@ export const driverStateSchema = z
       })
       .strict()
       .nullable(),
+    offer: z
+      .object({
+        id: z.uuid(),
+        expiresAt: z.iso.datetime(),
+        serverNow: z.iso.datetime(),
+        pickup: z
+          .object({
+            address: z.string(),
+            lat: z.number(),
+            lng: z.number(),
+          })
+          .strict(),
+        dropoff: z
+          .object({
+            address: z.string(),
+            lat: z.number(),
+            lng: z.number(),
+          })
+          .strict(),
+        distanceToPickupM: z.number().int().nonnegative(),
+        tripDistanceM: z.number().int().nonnegative(),
+        quotedFareCents: z.number().int(),
+        passengerFirstName: z.string(),
+        notes: z.string().nullable(),
+      })
+      .strict()
+      .nullable(),
   })
   .strict();
 
@@ -138,6 +168,155 @@ export const bookingStatusChangedSchema = z
   })
   .strict();
 
+const offerPlaceSchema = z
+  .object({
+    address: z.string(),
+    lat: z.number(),
+    lng: z.number(),
+  })
+  .strict();
+
+/** Driver room. The open app uses this card; the lock-screen push stays generic. */
+export const offerNewSchema = z
+  .object({
+    offerId: z.uuid(),
+    bookingId: z.uuid(),
+    expiresAt: z.iso.datetime(),
+    serverNow: z.iso.datetime(),
+    pickup: offerPlaceSchema,
+    dropoff: offerPlaceSchema,
+    distanceToPickupM: z.number().int().nonnegative(),
+    tripDistanceM: z.number().int().nonnegative(),
+    quotedFareCents: z.number().int(),
+    passengerFirstName: z.string(),
+    notes: z.string().nullable(),
+  })
+  .strict();
+
+export const offerEndedSchema = z
+  .object({
+    offerId: z.uuid(),
+    bookingId: z.uuid(),
+  })
+  .strict();
+
+export const offerReceivedSchema = z
+  .object({
+    offerId: z.uuid(),
+  })
+  .strict();
+
+export const offerCreatedSchema = z
+  .object({
+    bookingId: z.uuid(),
+    offerId: z.uuid(),
+    driverId: z.uuid(),
+    driverName: z.string(),
+    expiresAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const OFFER_OUTCOMES = ['ACCEPTED', 'DECLINED', 'EXPIRED', 'CANCELLED'] as const;
+
+export const offerResolvedSchema = z
+  .object({
+    bookingId: z.uuid(),
+    offerId: z.uuid(),
+    driverId: z.uuid(),
+    outcome: z.enum(OFFER_OUTCOMES),
+  })
+  .strict();
+
+/** Lock-screen data for a driver offer. No address and no passenger name. */
+export const offerPushSchema = z
+  .object({
+    type: z.literal('offer'),
+    offerId: z.uuid(),
+    expiresAt: z.iso.datetime(),
+  })
+  .strict();
+
+export const PASSENGER_TRIP_TYPES = [
+  'driver_assigned',
+  'driver_arrived',
+  'no_driver_found',
+] as const;
+
+/** Passenger socket. The same facts go out as a push when the app is disconnected. */
+export const passengerTripSchema = z
+  .object({
+    bookingId: z.uuid(),
+    type: z.enum(PASSENGER_TRIP_TYPES),
+  })
+  .strict();
+
+/**
+ * Live booking card on /passenger. Driver contact details stay off this payload.
+ * ETA is seconds, or null when we do not have a position to estimate from.
+ */
+export const passengerBookingSchema = z
+  .object({
+    id: z.uuid(),
+    trackingId: z.string().min(1),
+    status: z.string().min(1),
+    etaSeconds: z.number().int().nonnegative().nullable(),
+    scheduledAt: z.iso.datetime().nullable(),
+    quotedFareCents: z.number().int(),
+    quotedTaxCents: z.number().int(),
+    notes: z.string().nullable(),
+    passengerName: z.string(),
+    vehicleType: z
+      .object({
+        id: z.uuid(),
+        name: z.string(),
+      })
+      .strict(),
+    stops: z.array(
+      z
+        .object({
+          sequence: z.number().int(),
+          type: z.enum(['PICKUP', 'DROPOFF', 'STOP']),
+          address: z.string(),
+          lat: z.number(),
+          lng: z.number(),
+        })
+        .strict(),
+    ),
+    driver: z
+      .object({
+        firstName: z.string(),
+        rating: z.number(),
+        vehicle: z
+          .object({
+            make: z.string(),
+            model: z.string(),
+            colour: z.string().nullable(),
+            plate: z.string(),
+            unitNumber: z.string().nullable(),
+          })
+          .strict()
+          .nullable(),
+      })
+      .strict()
+      .nullable(),
+  })
+  .strict();
+
+/**
+ * Server push of the assigned driver's latest point on /passenger.
+ * The event name matches driver telemetry. This payload is not a subscribe request,
+ * and it is only sent to the passenger on that booking.
+ */
+export const passengerDriverLocationSchema = z
+  .object({
+    bookingId: z.uuid(),
+    lat: z.number(),
+    lng: z.number(),
+    heading: z.number().nullable(),
+    ts: z.number().int().nullable(),
+  })
+  .strict();
+
 export const bookingCreatedSchema = z
   .object({
     id: z.uuid(),
@@ -169,6 +348,14 @@ export const SOCKET_EVENTS = {
   fleetDriverUpdated: 'fleet:driver_updated',
   bookingStatusChanged: 'booking:status_changed',
   bookingCreated: 'booking:created',
+  offerNew: 'offer:new',
+  offerCancelled: 'offer:cancelled',
+  offerExpired: 'offer:expired',
+  offerReceived: 'offer:received',
+  offerCreated: 'offer:created',
+  offerResolved: 'offer:resolved',
+  tripUpdate: 'trip:update',
+  bookingUpdated: 'booking:updated',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];
@@ -184,6 +371,17 @@ export type FleetDriver = z.infer<typeof fleetDriverSchema>;
 export type FleetSnapshot = z.infer<typeof fleetSnapshotSchema>;
 export type BookingStatusChanged = z.infer<typeof bookingStatusChangedSchema>;
 export type BookingCreated = z.infer<typeof bookingCreatedSchema>;
+export type OfferNew = z.infer<typeof offerNewSchema>;
+export type OfferEnded = z.infer<typeof offerEndedSchema>;
+export type OfferReceived = z.infer<typeof offerReceivedSchema>;
+export type OfferCreated = z.infer<typeof offerCreatedSchema>;
+export type OfferResolved = z.infer<typeof offerResolvedSchema>;
+export type OfferOutcome = (typeof OFFER_OUTCOMES)[number];
+export type OfferPush = z.infer<typeof offerPushSchema>;
+export type PassengerTrip = z.infer<typeof passengerTripSchema>;
+export type PassengerTripType = (typeof PASSENGER_TRIP_TYPES)[number];
+export type PassengerBooking = z.infer<typeof passengerBookingSchema>;
+export type PassengerDriverLocation = z.infer<typeof passengerDriverLocationSchema>;
 
 /** On a trip or heading to one. Idle drivers (available or away) ping more slowly. */
 export const LOCATION_PING_ACTIVE_MS = 5_000;
@@ -207,4 +405,12 @@ export const socketPayloads = {
   [SOCKET_EVENTS.fleetDriverUpdated]: fleetDriverUpdatedSchema,
   [SOCKET_EVENTS.bookingStatusChanged]: bookingStatusChangedSchema,
   [SOCKET_EVENTS.bookingCreated]: bookingCreatedSchema,
+  [SOCKET_EVENTS.offerNew]: offerNewSchema,
+  [SOCKET_EVENTS.offerCancelled]: offerEndedSchema,
+  [SOCKET_EVENTS.offerExpired]: offerEndedSchema,
+  [SOCKET_EVENTS.offerReceived]: offerReceivedSchema,
+  [SOCKET_EVENTS.offerCreated]: offerCreatedSchema,
+  [SOCKET_EVENTS.offerResolved]: offerResolvedSchema,
+  [SOCKET_EVENTS.tripUpdate]: passengerTripSchema,
+  [SOCKET_EVENTS.bookingUpdated]: passengerBookingSchema,
 } as const;

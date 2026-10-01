@@ -18,6 +18,8 @@ redis.call('HDEL', KEYS[1], 'staleSince')
 redis.call('SET', KEYS[3], '1', 'EX', ARGV[7])
 if status == 'AVAILABLE' then
   redis.call('GEOADD', KEYS[2], ARGV[1], ARGV[2], ARGV[8])
+else
+  redis.call('ZREM', KEYS[2], ARGV[8])
 end
 return 1
 `;

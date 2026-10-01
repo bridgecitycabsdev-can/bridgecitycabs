@@ -9,6 +9,8 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { OFFER_RESOLVED } from '../dispatch/offer-events.js';
 import {
   driverStateSchema,
   fleetDriverSchema,
@@ -32,12 +34,15 @@ import {
   driverKey,
   geoAvailableKey,
   LOC_BUFFER_KEY,
+  offerReserveKey,
+  offeredDriversKey,
   onlineKey,
   presenceKey,
   sessionKey,
 } from '../redis/redis.keys.js';
 import {
   driverIdReleasedBy,
+  driverOfferSnapshot,
   passengerFirstName,
   presenceFromBooking,
   presenceOnBookingStatus,
@@ -64,6 +69,8 @@ type PublishInput = {
   name: string;
   unit: string;
   vehicleType: string;
+  vehicleId: string;
+  ladyDriverEligible: boolean;
   bookingId: string | null;
 };
 
@@ -73,8 +80,8 @@ type StartResult =
 
 /**
  * Sole writer of the fleet Redis keys: driver hash, presence, online set,
- * available geo, driver session, and the location history buffer. Location
- * pings go through updateLocation so longitude stays before latitude.
+ * available geo, offer reservation, driver session, and the location history buffer.
+ * Location pings go through updateLocation so longitude stays before latitude.
  */
 @Injectable()
 export class FleetStateService {
@@ -84,6 +91,7 @@ export class FleetStateService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly consent: LocationConsentService,
+    private readonly events: EventEmitter2,
     @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
@@ -202,6 +210,61 @@ export class FleetStateService {
     return Number(updated);
   }
 
+  /**
+   * Atomically claim an AVAILABLE driver for one offer.
+   * Returns false when another writer already took them.
+   */
+  async reserveOffer(input: {
+    driverId: string;
+    branchId: string;
+    offerId: string;
+    bookingId: string;
+    ttlSeconds: number;
+  }) {
+    const ttl = Math.floor(input.ttlSeconds);
+    if (!Number.isFinite(ttl) || ttl < 1) return false;
+    const reserved = await this.redis.reserveOffer(
+      driverKey(input.driverId),
+      geoAvailableKey(input.branchId),
+      offerReserveKey(input.driverId),
+      input.offerId,
+      input.bookingId,
+      String(ttl),
+      input.driverId,
+    );
+    return Number(reserved) === 1;
+  }
+
+  /**
+   * Reverse a reservation only while this booking still has the driver OFFERED.
+   * Returns false when the driver has already moved on.
+   */
+  async releaseOffer(input: { driverId: string; branchId: string; bookingId: string }) {
+    const released = await this.redis.releaseOffer(
+      driverKey(input.driverId),
+      geoAvailableKey(input.branchId),
+      offerReserveKey(input.driverId),
+      input.bookingId,
+      input.driverId,
+      String(Date.now()),
+    );
+    return Number(released) === 1;
+  }
+
+  /** A passenger retry may offer drivers who were already tried in the previous search. */
+  async clearOfferedDrivers(bookingId: string) {
+    await this.redis.del(offeredDriversKey(bookingId));
+  }
+
+  /** Remember that this driver was already offered the booking. The set lives for one hour. */
+  async rememberOfferedDriver(bookingId: string, driverId: string) {
+    const key = offeredDriversKey(bookingId);
+    const pipe = this.redis.multi();
+    pipe.sadd(key, driverId);
+    pipe.expire(key, 60 * 60);
+    await this.exec(pipe);
+  }
+
   /** Live point for the passenger on this driver's active trip. No trail and no contact fields. */
   async sharedPosition(driverId: string) {
     const [lat, lng, heading, ts] = await this.redis.hmget(
@@ -224,9 +287,19 @@ export class FleetStateService {
     };
   }
 
-  async assertAvailableForAssign(driverId: string) {
-    const status = await this.redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.status);
-    if (status !== 'AVAILABLE') throw new ConflictException('DRIVER_NOT_AVAILABLE');
+  /**
+   * A driver reserved for this same booking can still be manually assigned.
+   * The offer is cancelled in that transaction, then Redis is released after commit.
+   */
+  async assertAvailableForAssign(driverId: string, bookingId?: string) {
+    const [status, reservedFor] = await this.redis.hmget(
+      driverKey(driverId),
+      DRIVER_HASH_FIELDS.status,
+      DRIVER_HASH_FIELDS.bookingId,
+    );
+    if (status === 'AVAILABLE') return;
+    if (bookingId && status === 'OFFERED' && reservedFor === bookingId) return;
+    throw new ConflictException('DRIVER_NOT_AVAILABLE');
   }
 
   async driverIdForUser(userId: string) {
@@ -374,6 +447,7 @@ export class FleetStateService {
 
   /** Rebuild open shifts Redis lost, and clear hashes that still point at a finished booking. */
   async reconcile() {
+    await this.expireOffersMissingReserve();
     const shifts = await this.prisma.driverShift.findMany({
       where: { endedAt: null },
       select: { driverId: true },
@@ -562,8 +636,14 @@ export class FleetStateService {
   }
 
   private publishFrom(
-    driver: { id: string; branchId: string; firstName: string; lastName: string },
-    vehicle: { unitNumber: string | null; vehicleType: { name: string } },
+    driver: {
+      id: string;
+      branchId: string;
+      firstName: string;
+      lastName: string;
+      ladyDriverEligible: boolean | null;
+    },
+    vehicle: { id: string; unitNumber: string | null; vehicleType: { name: string } },
     version: number,
     bookingId: string | null,
     status: DriverPresenceState,
@@ -576,16 +656,20 @@ export class FleetStateService {
       name: `${driver.firstName} ${driver.lastName}`.trim(),
       unit: vehicle.unitNumber ?? '',
       vehicleType: vehicle.vehicleType.name,
+      vehicleId: vehicle.id,
+      ladyDriverEligible: driver.ladyDriverEligible === true,
       bookingId,
     };
   }
 
   private async writeOnline(input: PublishInput, options?: { stale?: boolean }) {
     const key = driverKey(input.driverId);
-    const [lat, lng] = await this.redis.hmget(
+    const [lat, lng, currentStatus, availableSince] = await this.redis.hmget(
       key,
       DRIVER_HASH_FIELDS.lat,
       DRIVER_HASH_FIELDS.lng,
+      DRIVER_HASH_FIELDS.status,
+      DRIVER_HASH_FIELDS.availableSince,
     );
     const pipe = this.redis.multi();
     pipe.hset(key, {
@@ -595,7 +679,14 @@ export class FleetStateService {
       [DRIVER_HASH_FIELDS.name]: input.name,
       [DRIVER_HASH_FIELDS.unit]: input.unit,
       [DRIVER_HASH_FIELDS.vehicleType]: input.vehicleType,
+      [DRIVER_HASH_FIELDS.vehicleId]: input.vehicleId,
+      [DRIVER_HASH_FIELDS.ladyDriverEligible]: input.ladyDriverEligible ? '1' : '0',
     });
+    if (input.status === 'AVAILABLE' && (currentStatus !== 'AVAILABLE' || !availableSince)) {
+      pipe.hset(key, DRIVER_HASH_FIELDS.availableSince, String(Date.now()));
+    } else if (input.status !== 'AVAILABLE') {
+      pipe.hdel(key, DRIVER_HASH_FIELDS.availableSince);
+    }
     if (options?.stale) {
       pipe.hset(key, DRIVER_HASH_FIELDS.staleSince, String(Date.now()));
     } else {
@@ -644,6 +735,7 @@ export class FleetStateService {
           scheduledAt: true,
           notes: true,
           quotedFareCents: true,
+          distanceMeters: true,
           passenger: { select: { firstName: true } },
           stops: {
             orderBy: { sequence: 'asc' },
@@ -674,6 +766,15 @@ export class FleetStateService {
       ? hashVersion
       : (driver?.presenceVersion ?? 0);
 
+    const serverNow = new Date();
+    const openOffer =
+      status === 'OFFERED'
+        ? await this.prisma.bookingOffer.findFirst({
+            where: { driverId, status: 'OFFERED' },
+            select: { id: true, bookingId: true, expiresAt: true, distanceToPickupM: true },
+          })
+        : null;
+
     return driverStateSchema.parse({
       v: version,
       status,
@@ -703,6 +804,21 @@ export class FleetStateService {
             quotedFareCents: booking.quotedFareCents,
           }
         : null,
+      offer:
+        openOffer && booking && openOffer.bookingId === booking.id
+          ? driverOfferSnapshot(
+              openOffer,
+              {
+                distanceMeters: booking.distanceMeters,
+                quotedFareCents: booking.quotedFareCents,
+                notes: booking.notes,
+                passengerName: booking.passengerName,
+                passengerFirstName: booking.passenger?.firstName,
+                stops: booking.stops,
+              },
+              serverNow,
+            )
+          : null,
     });
   }
 
@@ -778,6 +894,89 @@ export class FleetStateService {
       branchId: driver.branchId,
       snapshot: await this.snapshot(driverId),
     };
+  }
+
+  /**
+   * A Redis flush drops the driver claim while Postgres still says OFFERED.
+   * Expire that offer, return the booking to search, and let the status event free the driver.
+   */
+  private async expireOffersMissingReserve() {
+    const offers = await this.prisma.bookingOffer.findMany({
+      where: { status: 'OFFERED' },
+      select: { id: true, bookingId: true, driverId: true },
+    });
+    for (const offer of offers) {
+      if (await this.redis.exists(offerReserveKey(offer.driverId))) continue;
+      try {
+        await this.expireUnreservedOffer(offer);
+      } catch (error) {
+        this.logger.warn(
+          `Offer ${offer.id} was not expired: ${
+            error instanceof Error ? error.message : 'unknown error'
+          }`,
+        );
+      }
+    }
+  }
+
+  private async expireUnreservedOffer(offer: {
+    id: string;
+    bookingId: string;
+    driverId: string;
+  }) {
+    const now = new Date();
+    const result = await this.prisma.$transaction(async (tx) => {
+      const expired = await tx.bookingOffer.updateMany({
+        where: { id: offer.id, status: 'OFFERED' },
+        data: { status: 'EXPIRED', respondedAt: now },
+      });
+      if (expired.count !== 1) return null;
+
+      const booking = await tx.booking.findUnique({
+        where: { id: offer.bookingId },
+        select: { id: true, branchId: true, status: true, version: true, driverId: true },
+      });
+      if (!booking || booking.status !== 'MATCHED') {
+        throw new Error('Offer is open but the booking is not matched');
+      }
+      const moved = await tx.booking.updateMany({
+        where: { id: booking.id, status: 'MATCHED', version: booking.version },
+        data: {
+          status: 'SEARCHING_DRIVER',
+          version: { increment: 1 },
+          driverId: null,
+          vehicleId: null,
+        },
+      });
+      if (moved.count !== 1) throw new Error('Booking changed while expiring the offer');
+
+      await tx.bookingStatusHistory.create({
+        data: {
+          bookingId: booking.id,
+          fromStatus: 'MATCHED',
+          toStatus: 'SEARCHING_DRIVER',
+          actorType: 'SYSTEM',
+          reason: 'Offer reservation lost',
+        },
+      });
+      return {
+        bookingId: booking.id,
+        branchId: booking.branchId,
+        from: 'MATCHED' as const,
+        to: 'SEARCHING_DRIVER' as const,
+        prevDriverId: booking.driverId ?? offer.driverId,
+        driverId: null,
+      };
+    });
+    if (!result) return;
+    await this.events.emitAsync('booking.status_changed', result);
+    await this.events.emitAsync(OFFER_RESOLVED, {
+      offerId: offer.id,
+      bookingId: offer.bookingId,
+      driverId: offer.driverId,
+      branchId: result.branchId,
+      outcome: 'EXPIRED',
+    });
   }
 
   private async reconcileDriver(driverId: string) {

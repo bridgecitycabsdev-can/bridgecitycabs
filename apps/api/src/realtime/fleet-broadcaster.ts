@@ -3,9 +3,13 @@ import {
   SOCKET_EVENTS,
   bookingCreatedSchema,
   bookingStatusChangedSchema,
+  offerCreatedSchema,
+  offerResolvedSchema,
   type BookingCreated,
   type BookingStatusChanged,
   type FleetDriver,
+  type OfferCreated,
+  type OfferResolved,
 } from '@bridgecabs/shared-types';
 import type { Namespace } from 'socket.io';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
@@ -37,6 +41,18 @@ export class FleetBroadcaster implements OnModuleDestroy {
     const body = bookingStatusChangedSchema.parse(payload);
     assertBroadcastSafe(body);
     this.server?.to(branchRoom(branchId)).emit(SOCKET_EVENTS.bookingStatusChanged, body);
+  }
+
+  emitOfferCreated(branchId: string, payload: OfferCreated) {
+    const body = offerCreatedSchema.parse(payload);
+    assertBroadcastSafe(body);
+    this.server?.to(branchRoom(branchId)).emit(SOCKET_EVENTS.offerCreated, body);
+  }
+
+  emitOfferResolved(branchId: string, payload: OfferResolved) {
+    const body = offerResolvedSchema.parse(payload);
+    assertBroadcastSafe(body);
+    this.server?.to(branchRoom(branchId)).emit(SOCKET_EVENTS.offerResolved, body);
   }
 
   mark(branchId: string, driverId: string) {

@@ -262,7 +262,15 @@ async function main() {
 
 // Screenshot placeholders, tax-exclusive, minimum and per-minute left at 0.
 // Out-of-town amounts were not in the notes available here, so they are not seeded.
+// Sedan reuses the SUV placeholder so the downtown simulator can quote a sedan.
 const PLACEHOLDER_FARES = [
+  {
+    type: 'Sedan',
+    zone: 'INSIDE_TOWN',
+    title: 'Sedan inside town',
+    baseFareCents: 595,
+    perKmCents: 249,
+  },
   {
     type: 'SUV',
     zone: 'INSIDE_TOWN',
@@ -336,7 +344,13 @@ async function seedDemo(
     throw new Error('Missing demo vehicle models');
   }
 
-  await upsertVehicle(branchId, {
+  const corolla = models.get('Toyota Corolla');
+  const accord = models.get('Honda Accord');
+  if (!corolla || !accord) {
+    throw new Error('Missing demo sedan models');
+  }
+
+  const priyaCar = await upsertVehicle(branchId, {
     plateNumber: 'LTH111',
     unitNumber: '111',
     year: 2022,
@@ -344,6 +358,15 @@ async function seedDemo(
     seats: 4,
     modelId: camry.id,
     vehicleTypeId: camry.vehicleTypeId,
+  });
+  const noahCar = await upsertVehicle(branchId, {
+    plateNumber: 'LTH112',
+    unitNumber: '112',
+    year: 2020,
+    color: 'Blue',
+    seats: 4,
+    modelId: corolla.id,
+    vehicleTypeId: corolla.vehicleTypeId,
   });
   await upsertVehicle(branchId, {
     plateNumber: 'LTH123',
@@ -354,23 +377,47 @@ async function seedDemo(
     modelId: sienna.id,
     vehicleTypeId: sienna.vehicleTypeId,
   });
+  const samCar = await upsertVehicle(branchId, {
+    plateNumber: 'LTH124',
+    unitNumber: '124',
+    year: 2019,
+    color: 'White',
+    seats: 4,
+    modelId: accord.id,
+    vehicleTypeId: accord.vehicleTypeId,
+  });
 
-  await upsertDriver(branchId, driverRoleId, approvedById, {
+  const priya = await upsertDriver(branchId, driverRoleId, approvedById, {
     email: 'seed.driver.priya@bridgecabs.local',
-    phone: '+14035551001',
+    phone: '+14035550100',
     firstName: 'Priya',
     lastName: 'Shah',
   });
-  await upsertDriver(branchId, driverRoleId, approvedById, {
+  const noah = await upsertDriver(branchId, driverRoleId, approvedById, {
     email: 'seed.driver.noah@bridgecabs.local',
-    phone: '+14035551002',
+    phone: '+14035550101',
     firstName: 'Noah',
     lastName: 'Tremblay',
   });
+  const sam = await upsertDriver(branchId, driverRoleId, approvedById, {
+    email: 'seed.driver.sam@bridgecabs.local',
+    phone: '+14035550102',
+    firstName: 'Sam',
+    lastName: 'Okoye',
+  });
+
+  await ensureAssignment(priya, priyaCar.id);
+  await ensureAssignment(noah, noahCar.id);
+  await ensureAssignment(sam, samCar.id);
+  await ensureDemoDocuments([
+    { driverId: priya, vehicleId: priyaCar.id },
+    { driverId: noah, vehicleId: noahCar.id },
+    { driverId: sam, vehicleId: samCar.id },
+  ]);
 
   await upsertPassenger(passengerRoleId, {
     email: 'seed.passenger.amira@bridgecabs.local',
-    phone: '+14035551003',
+    phone: '+14035550199',
     firstName: 'Amira',
     lastName: 'Haddad',
   });
@@ -388,7 +435,7 @@ async function upsertVehicle(
     vehicleTypeId: string;
   },
 ) {
-  await prisma.vehicle.upsert({
+  return prisma.vehicle.upsert({
     where: {
       branchId_plateNumber: {
         branchId,
@@ -440,7 +487,7 @@ async function upsertDriver(
       isActive: true,
     },
   });
-  await prisma.driver.upsert({
+  const driver = await prisma.driver.upsert({
     where: { userId: account.id },
     update: {
       branchId,
@@ -463,6 +510,47 @@ async function upsertDriver(
       approvedById,
     },
   });
+  return driver.id;
+}
+
+async function ensureAssignment(driverId: string, vehicleId: string) {
+  const open = await prisma.driverVehicleAssignment.findFirst({
+    where: { driverId, endedAt: null },
+  });
+  if (open) return;
+  const vehicleTaken = await prisma.driverVehicleAssignment.findFirst({
+    where: { vehicleId, endedAt: null },
+  });
+  if (vehicleTaken) return;
+  await prisma.driverVehicleAssignment.create({
+    data: { driverId, vehicleId },
+  });
+}
+
+async function ensureDemoDocuments(pairs: { driverId: string; vehicleId: string }[]) {
+  const required = await prisma.documentType.findMany({ where: { required: true } });
+  const expiresAt = new Date('2030-01-01T00:00:00.000Z');
+  for (const pair of pairs) {
+    for (const documentType of required) {
+      const driverId = documentType.owner === 'DRIVER' ? pair.driverId : null;
+      const vehicleId = documentType.owner === 'VEHICLE' ? pair.vehicleId : null;
+      const existing = await prisma.document.findFirst({
+        where: { documentTypeId: documentType.id, driverId, vehicleId, status: 'APPROVED' },
+      });
+      if (existing) continue;
+      await prisma.document.create({
+        data: {
+          documentTypeId: documentType.id,
+          driverId,
+          vehicleId,
+          storageKey: `seed/${pair.driverId}/${documentType.code}`,
+          status: 'APPROVED',
+          expiresAt,
+          reviewedAt: new Date(),
+        },
+      });
+    }
+  }
 }
 
 async function upsertPassenger(

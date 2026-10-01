@@ -20,7 +20,7 @@ export const TRANSITIONS: Partial<Record<BookingStatus, Map>> = {
     CANCELLED: ['PASSENGER', 'STAFF'],
   },
   MATCHED: {
-    DRIVER_ASSIGNED: ['SYSTEM'],
+    DRIVER_ASSIGNED: ['DRIVER', 'SYSTEM'],
     SEARCHING_DRIVER: ['SYSTEM'],
     CANCELLED: ['PASSENGER', 'STAFF'],
   },
@@ -59,6 +59,7 @@ export const LIVE_BOOKING_STATUSES = [
   'TRIP_STARTED',
 ] as const satisfies readonly BookingStatus[];
 
+/** Statuses that hold a driver snapshot. Search clears it, including a MATCHED reservation. */
 const ASSIGNED_STATUSES: readonly BookingStatus[] = [
   'MATCHED',
   'DRIVER_ASSIGNED',

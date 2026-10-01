@@ -1,30 +1,37 @@
 import { io } from 'socket.io-client';
 import { SOCKET_EVENTS } from '@bridgecabs/shared-types';
-import { api, apiOrigin, loadEnvFile } from './load-env.js';
+import { PrismaClient } from '@prisma/client';
+import { loadEnvFile } from './load-env.js';
+import { api, apiOrigin, bearer, flag, otpLogin } from './sim-session.js';
 
 loadEnvFile();
 
-const phone = flag('phone') ?? process.env.SIM_DRIVER_PHONE ?? '+14035551001';
-const code = process.env.OTP_DEV_CODE;
-if (!code || code.length !== 6) {
-  throw new Error('Set OTP_DEV_CODE to the 6 digit development code');
-}
+const BEHAVIORS = ['accept', 'decline', 'ignore'] as const;
+type Behavior = (typeof BEHAVIORS)[number];
 
+const phone = flag('phone') ?? process.env.SIM_DRIVER_PHONE ?? '+14035550100';
+const behavior = readBehavior();
+const delaySeconds = readDelay();
+
+/** Tight square around downtown Lethbridge so these drivers stay in one search band. */
 const loop = [
-  { lat: 49.6935, lng: -112.8418, heading: 0 },
-  { lat: 49.6955, lng: -112.8418, heading: 0 },
-  { lat: 49.6955, lng: -112.8388, heading: 90 },
-  { lat: 49.6935, lng: -112.8388, heading: 180 },
+  { lat: 49.6952, lng: -112.8334, heading: 0 },
+  { lat: 49.6958, lng: -112.8334, heading: 0 },
+  { lat: 49.6958, lng: -112.8326, heading: 90 },
+  { lat: 49.6952, lng: -112.8326, heading: 180 },
 ];
 
-const session = await login();
+const session = await otpLogin(phone);
 await acceptLocationNotice(session.accessToken);
+const vehicleId = await resolveVehicle(flag('vehicle') ?? process.env.SIM_VEHICLE_ID);
 const shift = await api('/api/v1/driver/shift/start', {
   method: 'POST',
-  headers: { authorization: `Bearer ${session.accessToken}` },
-  body: JSON.stringify(process.env.SIM_VEHICLE_ID ? { vehicleId: process.env.SIM_VEHICLE_ID } : {}),
+  headers: bearer(session.accessToken),
+  body: JSON.stringify(vehicleId ? { vehicleId } : {}),
 });
-console.log(`shift ${JSON.stringify(shift)}`);
+console.log(
+  `driver ${phone} behavior=${behavior} delay=${delaySeconds}s shift ${JSON.stringify(shift)}`,
+);
 
 const socket = io(`${apiOrigin()}/driver`, {
   transports: ['websocket'],
@@ -33,6 +40,24 @@ const socket = io(`${apiOrigin()}/driver`, {
 
 socket.on(SOCKET_EVENTS.driverState, (snapshot) => {
   console.log(`driver:state ${JSON.stringify(snapshot)}`);
+});
+socket.on(SOCKET_EVENTS.offerNew, (offer: { offerId: string }) => {
+  console.log(`offer:new ${JSON.stringify(offer)}`);
+  socket.emit(SOCKET_EVENTS.offerReceived, { offerId: offer.offerId });
+  console.log(`offer:received ${offer.offerId}`);
+  if (behavior === 'ignore') {
+    console.log(`ignoring ${offer.offerId}`);
+    return;
+  }
+  setTimeout(() => {
+    void respond(offer.offerId);
+  }, delaySeconds * 1000);
+});
+socket.on(SOCKET_EVENTS.offerExpired, (offer: { offerId: string }) => {
+  console.log(`offer:expired ${JSON.stringify(offer)}`);
+});
+socket.on(SOCKET_EVENTS.offerCancelled, (offer: { offerId: string }) => {
+  console.log(`offer:cancelled ${JSON.stringify(offer)}`);
 });
 socket.on('connect_error', (error: Error) => {
   console.error(`socket rejected: ${error.message}`);
@@ -58,38 +83,68 @@ socket.on('connect', () => {
   setInterval(send, 5_000);
 });
 
-async function login() {
-  const requested = await fetch(`${apiOrigin()}/api/v1/auth/otp/request`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ phone }),
-  });
-  if (requested.status !== 202 && requested.status !== 429) {
-    throw new Error(`OTP request failed: ${requested.status} ${await requested.text()}`);
+async function respond(offerId: string) {
+  const path =
+    behavior === 'accept'
+      ? `/api/v1/driver/offers/${offerId}/accept`
+      : `/api/v1/driver/offers/${offerId}/decline`;
+  try {
+    const result = await api(path, {
+      method: 'POST',
+      headers: bearer(session.accessToken),
+      body: behavior === 'decline' ? JSON.stringify({ reason: 'Not taking this one' }) : undefined,
+    });
+    console.log(`${behavior} ${offerId} ${JSON.stringify(result)}`);
+  } catch (error) {
+    console.error(
+      `${behavior} ${offerId} failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+    );
   }
-  return (await api('/api/v1/auth/otp/verify', {
-    method: 'POST',
-    body: JSON.stringify({ phone, code }),
-  })) as { accessToken: string };
 }
 
-function flag(name: string) {
-  const index = process.argv.indexOf(`--${name}`);
-  if (index === -1) return undefined;
-  const value = process.argv[index + 1];
-  if (!value || value.startsWith('--')) {
-    throw new Error(`--${name} needs a value`);
+function readBehavior(): Behavior {
+  const raw = flag('behavior') ?? 'ignore';
+  if (!BEHAVIORS.includes(raw as Behavior)) {
+    throw new Error('--behavior must be accept, decline, or ignore');
+  }
+  return raw as Behavior;
+}
+
+function readDelay() {
+  const raw = flag('delay');
+  if (raw === undefined) return 0;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('--delay must be a number of seconds');
   }
   return value;
 }
 
+async function resolveVehicle(raw: string | undefined) {
+  if (!raw) return undefined;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(raw)) {
+    return raw;
+  }
+  const prisma = new PrismaClient();
+  try {
+    const vehicle = await prisma.vehicle.findFirst({
+      where: { plateNumber: raw.trim().toUpperCase(), active: true },
+      select: { id: true },
+    });
+    if (!vehicle) throw new Error(`No active vehicle with plate ${raw}`);
+    return vehicle.id;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 async function acceptLocationNotice(accessToken: string) {
   const notice = (await api('/api/v1/driver/location-notice', {
-    headers: { authorization: `Bearer ${accessToken}` },
+    headers: bearer(accessToken),
   })) as { version: string };
   await api('/api/v1/driver/location-consent', {
     method: 'POST',
-    headers: { authorization: `Bearer ${accessToken}` },
+    headers: bearer(accessToken),
     body: JSON.stringify({ version: notice.version }),
   });
 }

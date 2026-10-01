@@ -75,6 +75,19 @@ describe('updateDriverLocation', () => {
     expect(position).toBeNull();
   });
 
+  it('removes an offered driver from the available geo index', async () => {
+    const offered = randomUUID();
+    keys.push(driverKey(offered), presenceKey(offered));
+    await redis.hset(driverKey(offered), 'status', 'AVAILABLE');
+    expect(await ping(offered, LETHBRIDGE.lng, LETHBRIDGE.lat)).toBe(1);
+    expect(await redis.geopos(geoAvailableKey(branchId), offered)).not.toEqual([null]);
+
+    await redis.hset(driverKey(offered), 'status', 'OFFERED');
+    expect(await ping(offered, LETHBRIDGE.lng, LETHBRIDGE.lat)).toBe(1);
+    const [position] = await redis.geopos(geoAvailableKey(branchId), offered);
+    expect(position).toBeNull();
+  });
+
   function ping(driverId: string, lng: string, lat: string) {
     return redis.updateDriverLocation(
       driverKey(driverId),

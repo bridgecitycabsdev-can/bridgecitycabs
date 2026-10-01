@@ -2,6 +2,7 @@ import { Global, Inject, Module, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Redis } from 'ioredis';
 import { REDIS, REDIS_BULLMQ, REDIS_SUBSCRIBER } from './redis.constants.js';
+import { registerOfferCommands } from './offer-reservation.js';
 import { registerLocationCommand } from './update-driver-location.js';
 
 function connect(url: string, maxRetriesPerRequest: number | null) {
@@ -33,6 +34,7 @@ function connect(url: string, maxRetriesPerRequest: number | null) {
       useFactory: (config: ConfigService) => {
         const redis = connect(config.getOrThrow<string>('REDIS_URL'), 2);
         registerLocationCommand(redis);
+        registerOfferCommands(redis);
         return redis;
       },
     },

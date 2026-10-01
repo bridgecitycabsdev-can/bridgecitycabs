@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   driverIdReleasedBy,
+  driverOfferSnapshot,
   passengerFirstName,
   presenceFromBooking,
   presenceOnBookingStatus,
@@ -9,6 +10,7 @@ import {
 describe('fleet presence', () => {
   it('maps a live booking onto the driver chip and stays available otherwise', () => {
     expect(presenceFromBooking(null)).toBe('AVAILABLE');
+    expect(presenceFromBooking('MATCHED')).toBe('OFFERED');
     expect(presenceFromBooking('DRIVER_ASSIGNED')).toBe('ASSIGNED');
     expect(presenceFromBooking('DRIVER_ARRIVING')).toBe('EN_ROUTE_PICKUP');
     expect(presenceFromBooking('DRIVER_ARRIVED')).toBe('ARRIVED');
@@ -26,7 +28,7 @@ describe('fleet presence', () => {
     expect(presenceOnBookingStatus('CANCELLED')).toBe('AVAILABLE');
     expect(presenceOnBookingStatus('NO_DRIVER_FOUND')).toBe('AVAILABLE');
     expect(presenceOnBookingStatus('PAYMENT_PENDING')).toBeNull();
-    expect(presenceOnBookingStatus('MATCHED')).toBeNull();
+    expect(presenceOnBookingStatus('MATCHED')).toBe('OFFERED');
   });
 
   it('frees the previous driver when the booking has already been reassigned', () => {
@@ -55,5 +57,40 @@ describe('fleet presence', () => {
     expect(passengerFirstName('Leila', 'Someone Else')).toBe('Leila');
     expect(passengerFirstName('  ', 'Amina Khan')).toBe('Amina');
     expect(passengerFirstName(null, '   ')).toBe('Passenger');
+  });
+
+  it('builds the offer card with server time so a reconnect can see what is left', () => {
+    const serverNow = new Date('2026-10-01T04:30:00.000Z');
+    const offer = driverOfferSnapshot(
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        expiresAt: new Date('2026-10-01T04:30:12.000Z'),
+        distanceToPickupM: 640,
+      },
+      {
+        distanceMeters: 1200,
+        quotedFareCents: 2500,
+        notes: 'Side door',
+        passengerName: 'Leila Hassan',
+        passengerFirstName: null,
+        stops: [
+          { type: 'PICKUP', address: 'City Hall', lat: 49.69, lng: -112.84 },
+          { type: 'DROPOFF', address: 'Airport', lat: 49.63, lng: -112.8 },
+        ],
+      },
+      serverNow,
+    );
+    expect(offer).toEqual({
+      id: '22222222-2222-4222-8222-222222222222',
+      expiresAt: '2026-10-01T04:30:12.000Z',
+      serverNow: '2026-10-01T04:30:00.000Z',
+      pickup: { address: 'City Hall', lat: 49.69, lng: -112.84 },
+      dropoff: { address: 'Airport', lat: 49.63, lng: -112.8 },
+      distanceToPickupM: 640,
+      tripDistanceM: 1200,
+      quotedFareCents: 2500,
+      passengerFirstName: 'Leila',
+      notes: 'Side door',
+    });
   });
 });

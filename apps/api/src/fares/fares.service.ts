@@ -66,6 +66,11 @@ export class FaresService {
   }
 
   private async resolveBranch(user: AuthUser, requested?: string) {
+    if (user.role === 'passenger') {
+      if (user.branchId) return this.requireBranch(user.branchId);
+      if (!requested) throw new BadRequestException('branchId is required');
+      return this.requireBranch(requested);
+    }
     if (user.role === 'super_admin') {
       if (!requested) throw new BadRequestException('branchId is required');
       return this.requireBranch(requested);

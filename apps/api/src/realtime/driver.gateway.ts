@@ -8,7 +8,7 @@ import {
   SubscribeMessage,
   WebSocketGateway,
 } from '@nestjs/websockets';
-import { SOCKET_EVENTS, driverLocationSchema } from '@bridgecabs/shared-types';
+import { SOCKET_EVENTS, driverLocationSchema, offerReceivedSchema } from '@bridgecabs/shared-types';
 import type { Namespace, Socket } from 'socket.io';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { watchAccessToken } from './access-token-watch.js';
@@ -19,6 +19,8 @@ import { driverRoom } from './rooms.js';
 import { admitSocket, guardSocketEvents } from './socket-guard.js';
 import { SocketAuth } from './socket-auth.js';
 import { SocketLimits } from './socket-limits.js';
+import { OfferAckWaiter } from './offer-ack.waiter.js';
+import { PassengerLocationRelay } from './passenger-location.relay.js';
 
 const DRIVER_ROLES = ['driver'] as const;
 
@@ -33,6 +35,8 @@ export class DriverGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly broadcaster: FleetBroadcaster,
     private readonly publisher: DriverPublisher,
     private readonly limits: SocketLimits,
+    private readonly acks: OfferAckWaiter,
+    private readonly locations: PassengerLocationRelay,
   ) {}
 
   afterInit(server: Namespace) {
@@ -77,7 +81,18 @@ export class DriverGateway implements OnGatewayInit, OnGatewayConnection, OnGate
       recordedAt: decision.recordedAt,
       receivedAtMs: decision.point.receivedAtMs,
     });
-    if (branchId) this.broadcaster.mark(branchId, driverId);
+    if (!branchId) return;
+    this.broadcaster.mark(branchId, driverId);
+    void this.locations.onPing(driverId);
+  }
+
+  @SubscribeMessage(SOCKET_EVENTS.offerReceived)
+  received(@MessageBody() payload: unknown, @ConnectedSocket() socket: Socket) {
+    const driverId = socket.data.driverId;
+    if (!driverId) return;
+    const parsed = offerReceivedSchema.safeParse(payload);
+    if (!parsed.success) return;
+    this.acks.receive(driverId, parsed.data.offerId);
   }
 
   private async connected(socket: Socket) {

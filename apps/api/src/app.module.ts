@@ -18,6 +18,8 @@ import { BranchesModule } from './branches/branches.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { AssignmentsModule } from './assignments/assignments.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { DevicesModule } from './devices/devices.module.js';
+import { DispatchModule } from './dispatch/dispatch.module.js';
 import { DriversModule } from './drivers/drivers.module.js';
 import { FleetModule } from './fleet/fleet.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
@@ -25,6 +27,7 @@ import { IdempotencyModule } from './idempotency/idempotency.module.js';
 import { FaresModule } from './fares/fares.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
+import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 
@@ -52,9 +55,12 @@ import { VehiclesModule } from './vehicles/vehicles.module.js';
     JobsModule,
     AssignmentsModule,
     DocumentsModule,
+    DispatchModule,
     PassengersModule,
     BookingsModule,
     FaresModule,
+    DevicesModule,
+    PushModule,
     RealtimeModule,
   ],
   controllers: [AppController],

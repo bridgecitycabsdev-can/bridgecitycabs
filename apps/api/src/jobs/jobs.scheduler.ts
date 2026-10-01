@@ -8,6 +8,7 @@ import {
   LOCATION_FLUSH_EVERY_MS,
   LOCATION_RETENTION_PATTERN,
   PRESENCE_SWEEP_EVERY_MS,
+  SCHEDULED_SWEEP_EVERY_MS,
 } from './job-names.js';
 
 const template = {
@@ -41,6 +42,11 @@ export class JobsScheduler implements OnModuleInit {
       JOB_NAMES.locationRetention,
       { pattern: LOCATION_RETENTION_PATTERN, tz: 'UTC' },
       { name: JOB_NAMES.locationRetention, opts: template },
+    );
+    await this.queue.upsertJobScheduler(
+      JOB_NAMES.scheduledSweep,
+      { every: SCHEDULED_SWEEP_EVERY_MS },
+      { name: JOB_NAMES.scheduledSweep, opts: template },
     );
   }
 }

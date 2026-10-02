@@ -163,11 +163,16 @@ describe('fleet rest (e2e)', () => {
       .expect(200);
     expect(own.body.branchId).toBe(homeBranchId);
     expect(own.body.drivers.map((driver: { id: string }) => driver.id)).toEqual([homeDriverId]);
-    expect(own.body.drivers[0]).toMatchObject({
-      status: 'AVAILABLE',
+    expect(own.body.drivers[0]).toEqual({
+      id: homeDriverId,
       name: 'Priya Nair',
+      unitNumber: '11',
+      vehicleType: `E2E Fleet Type ${stamp}`,
+      status: 'AVAILABLE',
       lat: expect.closeTo(49.6935, 3),
       lng: expect.closeTo(-112.8418, 3),
+      ts: expect.any(Number),
+      stale: false,
     });
 
     const ignored = await request(app.getHttpServer())

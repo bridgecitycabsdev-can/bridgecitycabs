@@ -1,10 +1,14 @@
 packages:
   - "apps/*"
+  - "!apps/driver-app"
+  - "!apps/passenger-app"
   - "packages/*"
+  - "!packages/bridgecabs_core"
 allowBuilds:
   '@firebase/util': true
   '@prisma/client': true
   "@prisma/engines": true
+  '@scarf/scarf': false
   argon2: true
   esbuild: true
   msgpackr-extract: true

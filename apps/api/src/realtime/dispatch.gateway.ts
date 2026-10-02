@@ -75,7 +75,10 @@ export class DispatchGateway implements OnGatewayInit, OnGatewayConnection {
   }
 
   private async joinBranch(socket: Socket, branchId: string) {
-    await socket.join(branchRoom(branchId));
+    const next = branchRoom(branchId);
+    const previous = [...socket.rooms].filter((room) => room.startsWith('branch:') && room !== next);
+    for (const room of previous) await socket.leave(room);
+    await socket.join(next);
     const payload = {
       branchId,
       drivers: await this.fleet.fleetDrivers(branchId),

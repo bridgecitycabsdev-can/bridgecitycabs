@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import type { AuthUser } from '../common/auth-user.js';
 import { branchWhere } from '../common/branch-scope.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { toDispatchDriver } from './dispatch-driver.js';
 import { branchDayWindow, shiftSeconds } from './fleet-day.js';
 import { countFleetChips } from './fleet-chips.js';
 import { FleetStateService } from './fleet-state.service.js';
@@ -15,7 +16,8 @@ export class FleetQueryService {
 
   async drivers(user: AuthUser, requestedBranchId?: string) {
     const branchId = await this.branchId(user, requestedBranchId);
-    return { branchId, drivers: await this.fleet.fleetDrivers(branchId) };
+    const live = await this.fleet.fleetDrivers(branchId);
+    return { branchId, drivers: live.map(toDispatchDriver) };
   }
 
   async summary(user: AuthUser, requestedBranchId?: string, now = new Date()) {

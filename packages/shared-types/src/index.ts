@@ -25,6 +25,26 @@ export const DRIVER_PRESENCE_STATES = [
 
 export const driverPresenceStateSchema = z.enum(DRIVER_PRESENCE_STATES);
 
+/** Dispatch console filters. OFFLINE drivers are omitted from these chips. */
+export const FLEET_CHIPS = ['ALL', 'BUSY', 'FREE', 'ASSIGN', 'WAIT', 'AWAY'] as const;
+
+export type FleetChip = (typeof FLEET_CHIPS)[number];
+
+export const FLEET_CHIP_BY_STATUS = {
+  AVAILABLE: 'FREE',
+  OFFERED: 'ASSIGN',
+  ASSIGNED: 'ASSIGN',
+  EN_ROUTE_PICKUP: 'ASSIGN',
+  ARRIVED: 'WAIT',
+  ON_TRIP: 'BUSY',
+  AWAY: 'AWAY',
+} as const satisfies Partial<Record<DriverPresenceState, Exclude<FleetChip, 'ALL'>>>;
+
+export function fleetChipForStatus(status: DriverPresenceState): Exclude<FleetChip, 'ALL'> | null {
+  if (!(status in FLEET_CHIP_BY_STATUS)) return null;
+  return FLEET_CHIP_BY_STATUS[status as keyof typeof FLEET_CHIP_BY_STATUS];
+}
+
 export const driverLocationSchema = z.object({
   lat: z.number().gte(-90).lte(90),
   lng: z.number().gte(-180).lte(180),

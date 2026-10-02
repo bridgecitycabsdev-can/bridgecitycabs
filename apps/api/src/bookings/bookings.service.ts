@@ -195,6 +195,7 @@ export class BookingsService {
     if (query.paymentStatus) where.paymentStatus = query.paymentStatus;
     if (query.paymentMethod) where.paymentMethod = query.paymentMethod;
     if (query.driverId) where.driverId = query.driverId;
+    if (query.zone) where.zone = query.zone;
     if (tab && query.status) where.status = query.status;
     else if (tab) where.status = { in: [...tab] };
     else if (query.status) where.status = query.status;

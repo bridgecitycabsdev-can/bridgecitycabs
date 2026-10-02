@@ -1,6 +1,7 @@
 import {
   BookingSource,
   BookingStatus,
+  FareZone,
   PaymentMethod,
   PaymentStatus,
 } from '@prisma/client';
@@ -32,6 +33,10 @@ export class BookingQuery extends PageQuery {
   @IsOptional()
   @IsUUID()
   driverId?: string;
+
+  @IsOptional()
+  @IsEnum(FareZone)
+  zone?: FareZone;
 
   @IsOptional()
   @IsDateString()

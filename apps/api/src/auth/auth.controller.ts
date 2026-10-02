@@ -6,10 +6,12 @@ import {
   HttpStatus,
   Post,
   Req,
+  Res,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
@@ -18,6 +20,12 @@ import { LoginDto } from './dto/login.dto.js';
 import { RequestOtpDto } from './dto/request-otp.dto.js';
 import { RefreshTokenDto } from './dto/refresh-token.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
+import {
+  clearRefreshCookie,
+  isWebClient,
+  presentSession,
+  refreshTokenFrom,
+} from './web-refresh-cookie.js';
 
 @Controller('auth')
 export class AuthController {
@@ -28,8 +36,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @UseGuards(ThrottlerGuard)
-  login(@Body() body: LoginDto) {
-    return this.authService.login(body.email, body.password);
+  async login(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: LoginDto,
+  ) {
+    return presentSession(req, res, await this.authService.login(body.email, body.password));
   }
 
   @Public()
@@ -42,21 +54,44 @@ export class AuthController {
   @Public()
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
-  verifyOtp(@Body() body: VerifyOtpDto) {
-    return this.authService.verifyOtp(body.phone, body.code);
+  async verifyOtp(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: VerifyOtpDto,
+  ) {
+    return presentSession(req, res, await this.authService.verifyOtp(body.phone, body.code));
   }
 
   @Public()
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  refresh(@Body() body: RefreshTokenDto) {
-    return this.authService.refresh(body.refreshToken);
+  async refresh(
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: RefreshTokenDto,
+  ) {
+    try {
+      const tokens = await this.authService.refresh(refreshTokenFrom(req, body));
+      return presentSession(req, res, tokens);
+    } catch (error) {
+      if (isWebClient(req) && error instanceof UnauthorizedException) {
+        clearRefreshCookie(res);
+      }
+      throw error;
+    }
   }
 
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  logout(@CurrentUser() user: AuthUser, @Body() body: RefreshTokenDto) {
-    return this.authService.logout(user.userId, body.refreshToken);
+  async logout(
+    @CurrentUser() user: AuthUser,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+    @Body() body: RefreshTokenDto,
+  ) {
+    const result = await this.authService.logout(user.userId, refreshTokenFrom(req, body));
+    if (isWebClient(req)) clearRefreshCookie(res);
+    return result;
   }
 
   @Get('me')

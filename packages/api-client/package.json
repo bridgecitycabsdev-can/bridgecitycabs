@@ -1,0 +1,28 @@
+{
+  "name": "@bridgecabs/api-client",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "files": ["dist"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "openapi-typescript http://localhost:3000/docs-json -o src/schema.d.ts",
+    "build": "tsc -p tsconfig.json && node --input-type=module -e \"import { copyFileSync } from 'node:fs'; copyFileSync('src/schema.d.ts', 'dist/schema.d.ts')\""
+  },
+  "dependencies": {
+    "@bridgecabs/shared-types": "workspace:*",
+    "openapi-fetch": "^0.15.0",
+    "socket.io-client": "^4.8.4"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.10.1",
+    "typescript": "^6.0.2"
+  }
+}

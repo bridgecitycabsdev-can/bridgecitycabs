@@ -30,6 +30,10 @@ import { PassengersModule } from './passengers/passengers.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
+import { DevBoardModule } from './dev/dev-board.module.js';
+
+const devBoardEnabled =
+  process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
 
 @Module({
   imports: [
@@ -62,6 +66,7 @@ import { VehiclesModule } from './vehicles/vehicles.module.js';
     DevicesModule,
     PushModule,
     RealtimeModule,
+    ...(devBoardEnabled ? [DevBoardModule] : []),
   ],
   controllers: [AppController],
   providers: [

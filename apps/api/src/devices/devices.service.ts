@@ -6,6 +6,10 @@ import type { RegisterDeviceDto } from './dto/register-device.dto.js';
 export class DevicesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Upsert by FCM token. Shared phones / re-logins reassign the token to the
+   * caller and clear revokedAt so PushService can use it again.
+   */
   async register(userId: string, dto: RegisterDeviceDto) {
     const saved = await this.prisma.deviceToken.upsert({
       where: { token: dto.token },
@@ -30,7 +34,11 @@ export class DevicesService {
     };
   }
 
+  /** Soft-revoke so the token is never pushed again until re-registered. */
   async remove(userId: string, token: string) {
-    await this.prisma.deviceToken.deleteMany({ where: { userId, token } });
+    await this.prisma.deviceToken.updateMany({
+      where: { userId, token, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
   }
 }

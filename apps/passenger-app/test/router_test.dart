@@ -52,6 +52,24 @@ void main() {
     expect(find.text('Where to?'), findsOneWidget);
     expect(find.text('Destination'), findsOneWidget);
   });
+
+  testWidgets('sends a finished trip to the receipt', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionProvider.overrideWith(_SignedIn.new),
+          activeBookingProvider.overrideWith(_Receipt.new),
+        ],
+        child: const PassengerApp(),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('Receipt'), findsOneWidget);
+    expect(find.text('Subtotal'), findsOneWidget);
+    expect(find.text('GST'), findsOneWidget);
+    expect(find.text('\$26.25'), findsOneWidget);
+  });
 }
 
 class _SignedIn extends SessionController {
@@ -150,5 +168,44 @@ class _Assigned extends ActiveBookingController {
         'unitNumber': '7',
       },
     },
+  });
+}
+
+class _Receipt extends ActiveBookingController {
+  @override
+  Future<ActiveBooking?> build() async => ActiveBooking.tryParse({
+    'id': '11111111-1111-4111-8111-111111111111',
+    'trackingId': 'BC-1',
+    'status': 'PAYMENT_PENDING',
+    'etaSeconds': null,
+    'scheduledAt': null,
+    'quotedFareCents': 2500,
+    'quotedTaxCents': 125,
+    'finalSubtotalCents': 2500,
+    'finalTaxCents': 125,
+    'finalFareCents': 2625,
+    'notes': null,
+    'passengerName': 'Alex',
+    'vehicleType': {
+      'id': '22222222-2222-4222-8222-222222222222',
+      'name': 'Sedan',
+    },
+    'stops': [
+      {
+        'sequence': 0,
+        'type': 'PICKUP',
+        'address': 'A',
+        'lat': 1.0,
+        'lng': 2.0,
+      },
+      {
+        'sequence': 1,
+        'type': 'DROPOFF',
+        'address': 'B',
+        'lat': 3.0,
+        'lng': 4.0,
+      },
+    ],
+    'driver': null,
   });
 }

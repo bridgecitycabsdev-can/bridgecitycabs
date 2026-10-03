@@ -37,8 +37,11 @@ export const bookingDetailSchema = z.object({
   quotedFareCents: z.number(),
   quotedTaxCents: z.number(),
   fixedFareCents: z.number().nullable(),
+  finalSubtotalCents: z.number().nullable().optional(),
+  finalTaxCents: z.number().nullable().optional(),
   finalFareCents: z.number().nullable().optional(),
   paymentMethod: z.string(),
+  paymentStatus: z.string().optional(),
   notes: z.string().nullable(),
   vanOnly: z.boolean(),
   ladyDriverOnly: z.boolean(),
@@ -215,6 +218,20 @@ export function canCancel(status: string) {
     'CLOSED',
     'CANCELLED',
   ].includes(status)
+}
+
+/** Matches POST /bookings/:id/payment/cash roles. */
+export function canConfirmCash(role: string | undefined, status: string) {
+  if (!role || !['branch_admin', 'accounts_admin', 'super_admin'].includes(role)) {
+    return false
+  }
+  return status === 'PAYMENT_PENDING'
+}
+
+/** Matches POST /bookings/:id/adjust-fare roles. */
+export function canAdjustFare(role: string | undefined, status: string) {
+  if (!role || !['branch_admin', 'accounts_admin'].includes(role)) return false
+  return status === 'PAYMENT_PENDING'
 }
 
 export function secondsLeft(expiresAt: string, now = Date.now()) {

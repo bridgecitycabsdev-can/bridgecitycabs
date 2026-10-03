@@ -15,6 +15,9 @@ model Branch {
   timezone   String     @default("America/Edmonton")
   currency   String     @default("CAD")
   gstRateBps          Int       @default(500)
+  /// Platform commission in basis points of the pre-GST subtotal. Legacy
+  /// branches stored a deduction % — import the real value later. Seed is 0.
+  commissionBps       Int       @default(0)
   autoDispatchDefault Boolean   @default(false)
   offerTimeoutSeconds Int       @default(15)
   searchWindowSeconds Int       @default(120)
@@ -367,6 +370,32 @@ enum PaymentStatus {
   REFUNDED
 }
 
+/// Outcome of one Payment attempt. Booking.paymentStatus is the summary.
+enum PaymentRecordStatus {
+  PENDING
+  REQUIRES_ACTION
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum AccountType {
+  DRIVER_BALANCE
+  COMPANY_REVENUE
+  GST_PAYABLE
+  PAYMENT_CLEARING
+  PASSENGER_WALLET
+}
+
+enum LedgerKind {
+  TRIP_CASH
+  TRIP_CARD
+  ADJUSTMENT
+  REVERSAL
+}
+
 enum StopType {
   PICKUP
   DROPOFF
@@ -457,10 +486,21 @@ model Booking {
   scheduledAt          DateTime? // UTC; null means "now"
   distanceMeters       Int
   durationSeconds      Int
+  /// Pre-GST subtotal at quote/create time (`calcFare.subtotalCents`).
   quotedFareCents      Int
+  /// GST on the quote (`calcFare.taxCents`).
   quotedTaxCents       Int
   fixedFareCents       Int? // dispatcher override
-  finalFareCents       Int? // set at completion
+  /// GST-inclusive total at completion.
+  finalFareCents       Int?
+  /// Branch GST rate snapshotted when the booking is created.
+  gstRateBps           Int           @default(500)
+  /// Branch commission snapshotted when the trip is completed.
+  commissionBps        Int?
+  finalSubtotalCents   Int?
+  finalTaxCents        Int?
+  commissionCents      Int?
+  driverEarningCents   Int?
   cancellationFeeCents Int           @default(0)
   paymentMethod        PaymentMethod @default(CASH)
   paymentStatus        PaymentStatus @default(UNPAID)
@@ -483,11 +523,88 @@ model Booking {
   history              BookingStatusHistory[]
   assignments          BookingAssignment[]
   offers               BookingOffer[]
+  payments             Payment[]
 
   @@index([branchId, status, createdAt])
   @@index([driverId, status])
   @@index([passengerId, createdAt])
   @@index([scheduledAt])
+}
+
+/// One collection attempt. Amounts are always written by the server; the client
+/// never posts a figure. Booking.paymentStatus is updated in the same txn.
+model Payment {
+  id             String              @id @default(uuid())
+  bookingId      String
+  booking        Booking             @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  method         PaymentMethod
+  /// CASH | FAKE | STRIPE (Day 10). Server-set; not a client amount.
+  provider       String
+  status         PaymentRecordStatus @default(PENDING)
+  /// GST-inclusive amount for this attempt (server-computed).
+  amountCents    Int
+  currency       String              @default("CAD")
+  providerRef    String?
+  idempotencyKey String?             @unique
+  failureCode    String?
+  capturedAt     DateTime?
+  createdById    String?
+  createdAt      DateTime            @default(now())
+
+  @@index([bookingId])
+}
+
+/// Chart-of-accounts style wallet. Keys are stable, e.g. DRIVER_BALANCE:<driverId>.
+model FinancialAccount {
+  id       String        @id @default(uuid())
+  key      String        @unique
+  type     AccountType
+  branchId String?
+  ownerId  String?
+  currency String        @default("CAD")
+  entries  LedgerEntry[]
+}
+
+/// One balanced money movement. Append-only; reverse via a new REVERSAL row.
+model LedgerTransaction {
+  id           String        @id @default(uuid())
+  kind         LedgerKind
+  sourceType   String // BOOKING | REVERSAL | ...
+  sourceId     String
+  branchId     String
+  description  String?
+  reversalOfId String?       @unique
+  createdById  String?
+  createdAt    DateTime      @default(now())
+  entries      LedgerEntry[]
+
+  @@unique([sourceType, sourceId, kind])
+}
+
+/// Debit positive, credit negative. Sum per transaction must be zero (DB trigger).
+model LedgerEntry {
+  id            String            @id @default(uuid())
+  transactionId String
+  transaction   LedgerTransaction @relation(fields: [transactionId], references: [id])
+  accountId     String
+  account       FinancialAccount  @relation(fields: [accountId], references: [id])
+  amountCents   Int
+  createdAt     DateTime          @default(now())
+
+  @@index([accountId, createdAt])
+  @@index([transactionId])
+}
+
+/// App-agnostic consent (e.g. LOCATION_TRACKING). Driver-specific notice rows stay on DriverLocationConsent.
+model ConsentRecord {
+  id         String   @id @default(uuid())
+  userId     String
+  type       String
+  version    String
+  appVersion String?
+  acceptedAt DateTime @default(now())
+
+  @@index([userId, type])
 }
 
 model BookingStop {
@@ -555,6 +672,8 @@ model BookingOffer {
   @@index([driverId, offeredAt])
 }
 
+/// Push token. Registration upserts by `token` (app-agnostic): same token moves
+/// to the current user and clears revoke. Used by driver and passenger apps.
 model DeviceToken {
   id         String    @id @default(uuid())
   userId     String

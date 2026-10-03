@@ -254,6 +254,51 @@ class DriverBooking {
   }
 }
 
+class PendingPayment {
+  const PendingPayment({
+    required this.bookingId,
+    required this.trackingId,
+    required this.totalCents,
+    required this.subtotalCents,
+    required this.taxCents,
+    required this.method,
+  });
+
+  final String bookingId;
+  final String trackingId;
+  final int totalCents;
+  final int subtotalCents;
+  final int taxCents;
+  final String method;
+
+  static PendingPayment? tryParse(Object? data) {
+    final json = jsonMap(data);
+    if (json == null) return null;
+    final bookingId = json['bookingId'];
+    final trackingId = json['trackingId'];
+    final totalCents = json['totalCents'];
+    final subtotalCents = json['subtotalCents'];
+    final taxCents = json['taxCents'];
+    final method = json['method'];
+    if (bookingId is! String ||
+        trackingId is! String ||
+        totalCents is! int ||
+        subtotalCents is! int ||
+        taxCents is! int ||
+        method is! String) {
+      return null;
+    }
+    return PendingPayment(
+      bookingId: bookingId,
+      trackingId: trackingId,
+      totalCents: totalCents,
+      subtotalCents: subtotalCents,
+      taxCents: taxCents,
+      method: method,
+    );
+  }
+}
+
 class DriverSnapshot {
   const DriverSnapshot({
     required this.version,
@@ -262,6 +307,7 @@ class DriverSnapshot {
     required this.unitNumber,
     required this.booking,
     required this.offer,
+    required this.pendingPayment,
   });
 
   final int version;
@@ -270,6 +316,7 @@ class DriverSnapshot {
   final String? unitNumber;
   final DriverBooking? booking;
   final Offer? offer;
+  final PendingPayment? pendingPayment;
 
   bool get onShift => shiftStartedAt != null;
 
@@ -280,8 +327,10 @@ class DriverSnapshot {
     String? unitNumber,
     DriverBooking? booking,
     Offer? offer,
+    PendingPayment? pendingPayment,
     bool clearOffer = false,
     bool clearBooking = false,
+    bool clearPendingPayment = false,
   }) {
     return DriverSnapshot(
       version: version ?? this.version,
@@ -290,6 +339,9 @@ class DriverSnapshot {
       unitNumber: unitNumber ?? this.unitNumber,
       booking: clearBooking ? null : (booking ?? this.booking),
       offer: clearOffer ? null : (offer ?? this.offer),
+      pendingPayment: clearPendingPayment
+          ? null
+          : (pendingPayment ?? this.pendingPayment),
     );
   }
 
@@ -311,6 +363,7 @@ class DriverSnapshot {
       unitNumber: _text(vehicle?['unitNumber']),
       booking: booking,
       offer: offer,
+      pendingPayment: PendingPayment.tryParse(json['pendingPayment']),
     );
   }
 }

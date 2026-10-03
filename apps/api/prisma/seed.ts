@@ -30,13 +30,32 @@ const PERMISSIONS = [
   'bookings.write',
   'bookings.assign',
   'bookings.cancel',
+  'bookings.adjust_fare',
   'fares.read',
   'fares.write',
+  'finance.read',
+  'finance.write',
+  'payments.confirm',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
   super_admin: PERMISSIONS,
-  branch_admin: ['branches.read', 'users.read'],
+  branch_admin: [
+    'branches.read',
+    'users.read',
+    'bookings.read',
+    'bookings.adjust_fare',
+    'finance.read',
+    'payments.confirm',
+  ],
+  accounts_admin: [
+    'bookings.read',
+    'bookings.adjust_fare',
+    'finance.read',
+    'finance.write',
+    'payments.confirm',
+  ],
+  driver: ['payments.confirm'],
 };
 
 const VEHICLE_TYPES = ['Sedan', 'SUV', 'Minivan', 'Luxury'] as const;
@@ -164,6 +183,8 @@ async function main() {
           timezone: 'America/Edmonton',
           currency: 'CAD',
           gstRateBps: 500,
+          // Placeholder until legacy deduction % is imported.
+          commissionBps: 0,
           centerLat: 49.6935,
           centerLng: -112.8418,
         },
@@ -176,6 +197,8 @@ async function main() {
           timezone: 'America/Edmonton',
           currency: 'CAD',
           gstRateBps: 500,
+          // Placeholder until legacy deduction % is imported.
+          commissionBps: 0,
           centerLat: 49.6935,
           centerLng: -112.8418,
         },

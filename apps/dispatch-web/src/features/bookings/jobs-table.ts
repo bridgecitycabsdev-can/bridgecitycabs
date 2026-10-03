@@ -6,6 +6,7 @@ export const jobRowSchema = z.object({
   trackingId: z.string(),
   status: z.string(),
   source: z.string(),
+  paymentMethod: z.string().optional(),
   passengerName: z.string(),
   passengerPhone: z.string(),
   notes: z.string().nullable().optional(),
@@ -47,7 +48,6 @@ export type JobsPage = z.infer<typeof jobsPageSchema>
 
 export const CLOSED_STATUSES = [
   'TRIP_COMPLETED',
-  'PAYMENT_PENDING',
   'PAYMENT_COMPLETED',
   'CLOSED',
   'CANCELLED',

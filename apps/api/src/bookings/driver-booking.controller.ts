@@ -47,7 +47,16 @@ export class DriverBookingController {
   @Post(':id/complete')
   @HttpCode(HttpStatus.OK)
   complete(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
-    return this.move(user, id, 'TRIP_COMPLETED');
+    return this.bookings.complete(user, id);
+  }
+
+  @Post(':id/cash-collected')
+  @HttpCode(HttpStatus.OK)
+  cashCollected(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.bookings.collectCashAsDriver(user, id);
   }
 
   @Post(':id/release')

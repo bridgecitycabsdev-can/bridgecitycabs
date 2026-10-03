@@ -95,3 +95,8 @@ export function throttleHitKey(throttlerName: string, key: string) {
 export function throttleBlockKey(throttlerName: string, key: string) {
   return `throttle:${throttlerName}:${key}:blocked`;
 }
+
+/** Stuck PAYMENT_PENDING count for a branch (written by the daily alert job). */
+export function paymentPendingAlertKey(branchId: string) {
+  return `alert:payment_pending:${branchId}`;
+}

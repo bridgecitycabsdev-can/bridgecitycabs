@@ -39,6 +39,7 @@ export type DispatchConfig = {
   fixedFareMaxCents: number
   timezone: string
   autoDispatchDefault: boolean
+  paymentPendingAlertCount: number
   branchCenter: { lat: number; lng: number } | null
 }
 
@@ -49,6 +50,7 @@ export const dispatchConfigSchema = z.object({
   fixedFareMaxCents: z.number(),
   timezone: z.string().min(1),
   autoDispatchDefault: z.boolean(),
+  paymentPendingAlertCount: z.number().default(0),
   branchCenter: z.object({ lat: z.number(), lng: z.number() }).nullable(),
 })
 

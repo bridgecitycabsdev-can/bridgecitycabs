@@ -19,6 +19,7 @@ const config: DispatchConfig = {
   scheduleMaxDays: 30,
   offerTimeoutSeconds: 15,
   fixedFareMaxCents: 50_000,
+  paymentPendingAlertCount: 0,
   timezone: 'America/Edmonton',
   autoDispatchDefault: true,
   branchCenter: { lat: 49.6935, lng: -112.8418 },

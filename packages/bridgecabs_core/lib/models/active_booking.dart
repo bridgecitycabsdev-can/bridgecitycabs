@@ -15,6 +15,12 @@ const _trackingStatuses = {
   'TRIP_STARTED',
 };
 
+const _receiptStatuses = {
+  'TRIP_COMPLETED',
+  'PAYMENT_PENDING',
+  'PAYMENT_COMPLETED',
+};
+
 const _terminalStatuses = {
   'TRIP_COMPLETED',
   'PAYMENT_PENDING',
@@ -148,6 +154,9 @@ class ActiveBooking {
     this.scheduledAt,
     this.notes,
     this.driver,
+    this.finalSubtotalCents,
+    this.finalTaxCents,
+    this.finalFareCents,
   });
 
   final String id;
@@ -157,6 +166,9 @@ class ActiveBooking {
   final String? scheduledAt;
   final int quotedFareCents;
   final int quotedTaxCents;
+  final int? finalSubtotalCents;
+  final int? finalTaxCents;
+  final int? finalFareCents;
   final String? notes;
   final String passengerName;
   final String vehicleTypeId;
@@ -184,12 +196,23 @@ class ActiveBooking {
 
   bool get isTracking => _trackingStatuses.contains(status);
 
+  /// Trip finished — show subtotal / GST / total until the booking closes.
+  bool get isReceipt => _receiptStatuses.contains(status);
+
   /// Non-terminal bookings occupy the passenger and drive router redirects.
   bool get isLive => !isTerminal;
 
   bool get canCancel => _cancelableStatuses.contains(status);
 
   bool get noDriverFound => status == 'NO_DRIVER_FOUND';
+
+  /// Fare for the receipt: finals when present, otherwise the quote.
+  int get receiptSubtotalCents => finalSubtotalCents ?? quotedFareCents;
+
+  int get receiptTaxCents => finalTaxCents ?? quotedTaxCents;
+
+  int get receiptTotalCents =>
+      finalFareCents ?? (receiptSubtotalCents + receiptTaxCents);
 
   static ActiveBooking? tryParse(Object? data) {
     final json = jsonMap(data);
@@ -217,6 +240,9 @@ class ActiveBooking {
     final eta = json['etaSeconds'];
     final scheduledAt = json['scheduledAt'];
     final notes = json['notes'];
+    final finalSubtotalCents = json['finalSubtotalCents'];
+    final finalTaxCents = json['finalTaxCents'];
+    final finalFareCents = json['finalFareCents'];
     final rawStops = json['stops'];
     final stops = <BookingStop>[];
     if (rawStops is List) {
@@ -234,6 +260,9 @@ class ActiveBooking {
       scheduledAt: scheduledAt is String ? scheduledAt : null,
       quotedFareCents: quotedFareCents,
       quotedTaxCents: quotedTaxCents,
+      finalSubtotalCents: finalSubtotalCents is int ? finalSubtotalCents : null,
+      finalTaxCents: finalTaxCents is int ? finalTaxCents : null,
+      finalFareCents: finalFareCents is int ? finalFareCents : null,
       notes: notes is String ? notes : null,
       passengerName: passengerName,
       vehicleTypeId: vehicleTypeId,

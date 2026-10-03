@@ -20,6 +20,7 @@ import { branchWhere } from '../common/branch-scope.js';
 import { normalizePage, paginate } from '../common/pagination.js';
 import { normalizePhone } from '../common/phone.js';
 import { calcFare } from '../fares/calc-fare.js';
+import { finalizeFare, splitFare } from '../fares/finalize-fare.js';
 import {
   DISTANCE_SERVICE,
   type DistanceService,
@@ -33,6 +34,9 @@ import {
   OFFER_EXPIRY_SCHEDULER,
   type OfferExpiryScheduler,
 } from '../jobs/offer-expiry.scheduler.js';
+import { cashTripLedgerLines } from '../ledger/cash-ledger-lines.js';
+import { LedgerService } from '../ledger/ledger.service.js';
+import { PaymentProvidersService } from '../payments/payment-providers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertScheduledAt } from './booking-schedule.js';
 import {
@@ -41,6 +45,7 @@ import {
 } from './booking-state.service.js';
 import { BOOKING_TABS, type BookingTab } from './booking-tabs.js';
 import { assertEditable, editableFields } from './booking-edit.js';
+import type { AdjustFareDto } from './dto/adjust-fare.dto.js';
 import type { AssignBookingDto } from './dto/assign-booking.dto.js';
 import type { DispatchModeDto } from './dto/dispatch-mode.dto.js';
 import type { BookingQuery } from './dto/booking-query.dto.js';
@@ -60,6 +65,12 @@ const CREATE_ROLES = [
 ] as const;
 const ASSIGN_ROLES = ['dispatcher', 'branch_admin', 'super_admin'] as const;
 const STATUS_ROLES = ['branch_admin', 'super_admin'] as const;
+const CASH_STAFF_ROLES = [
+  'branch_admin',
+  'accounts_admin',
+  'super_admin',
+] as const;
+const ADJUST_FARE_ROLES = ['branch_admin', 'accounts_admin'] as const;
 
 const listInclude = {
   vehicleType: { select: { id: true, name: true } },
@@ -115,6 +126,8 @@ export class BookingsService {
     @Inject(OFFER_EXPIRY_SCHEDULER)
     private readonly expiry: OfferExpiryScheduler,
     @Inject(DISPATCH_QUEUE) private readonly dispatch: DispatchQueue,
+    private readonly ledger: LedgerService,
+    private readonly paymentProviders: PaymentProvidersService,
   ) {}
 
   async create(dto: CreateBookingDto, user: AuthUser) {
@@ -168,6 +181,7 @@ export class BookingsService {
       dto,
       user,
       branchId: branch.id,
+      gstRateBps: branch.gstRateBps,
       phone,
       passengerId: passenger?.id ?? null,
       scheduledAt,
@@ -539,6 +553,349 @@ export class BookingsService {
     return { id: result.bookingId, status: result.to };
   }
 
+  /**
+   * Finalizes fare cents and moves TRIP_STARTED → TRIP_COMPLETED → PAYMENT_PENDING.
+   * The Day 5 fleet bridge frees the driver on TRIP_COMPLETED so they can take
+   * another job while payment is still pending. CARD/ACCOUNT/WALLET stay in
+   * PAYMENT_PENDING until Day 10; today every booking is cash.
+   */
+  async complete(user: AuthUser, id: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId: user.userId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException();
+
+    const { completed, pending, response } = await this.prisma.$transaction(
+      async (tx) => {
+        const booking = await tx.booking.findUnique({
+          where: { id },
+          include: { branch: { select: { commissionBps: true } } },
+        });
+        if (!booking || booking.driverId !== driver.id) {
+          throw new NotFoundException();
+        }
+        if (booking.status !== 'TRIP_STARTED') {
+          throw new ConflictException(
+            `Illegal transition ${booking.status} → TRIP_COMPLETED`,
+          );
+        }
+
+        const fare = finalizeFare({
+          quotedSubtotalCents: booking.quotedFareCents,
+          fixedFareCents: booking.fixedFareCents,
+          gstBps: booking.gstRateBps,
+          fixedIncludesGst: this.fixedFareIncludesGst(),
+        });
+        const commissionBps = booking.branch.commissionBps;
+        const split = splitFare(fare.subtotalCents, commissionBps);
+        const completedAt = new Date();
+        const patch = {
+          completedAt,
+          finalSubtotalCents: fare.subtotalCents,
+          finalTaxCents: fare.taxCents,
+          finalFareCents: fare.totalCents,
+          commissionBps,
+          commissionCents: split.commissionCents,
+          driverEarningCents: split.driverEarningCents,
+        };
+
+        const completed = await this.state.transition(
+          booking.id,
+          'TRIP_COMPLETED',
+          { type: 'DRIVER', userId: user.userId },
+          { tx, patch },
+        );
+        const pending = await this.state.transition(
+          booking.id,
+          'PAYMENT_PENDING',
+          { type: 'SYSTEM' },
+          { tx },
+        );
+        return {
+          completed,
+          pending,
+          response: {
+            id: booking.id,
+            status: pending.to,
+            paymentMethod: booking.paymentMethod,
+            finalSubtotalCents: fare.subtotalCents,
+            finalTaxCents: fare.taxCents,
+            finalFareCents: fare.totalCents,
+            commissionBps,
+            commissionCents: split.commissionCents,
+            driverEarningCents: split.driverEarningCents,
+          },
+        };
+      },
+    );
+
+    await this.events.emitAsync('booking.status_changed', completed);
+    await this.events.emitAsync('booking.status_changed', pending);
+    return response;
+  }
+
+  /** Driver confirms cash received. Retries are safe once CLOSED + CAPTURED. */
+  async collectCashAsDriver(user: AuthUser, id: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId: user.userId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException();
+    return this.collectCash({
+      bookingId: id,
+      actor: { type: 'DRIVER', userId: user.userId },
+      assertAccess: (booking) => {
+        if (booking.driverId !== driver.id) throw new NotFoundException();
+      },
+    });
+  }
+
+  /** Staff cash confirmation. Writes an audit row with the actor. */
+  async collectCashAsStaff(user: AuthUser, id: string) {
+    this.assertRole(user, CASH_STAFF_ROLES);
+    return this.collectCash({
+      bookingId: id,
+      actor: { type: 'STAFF', userId: user.userId },
+      assertAccess: (booking) => {
+        const scope = this.scope(user);
+        if (!scope) throw new NotFoundException();
+        if (scope.branchId && booking.branchId !== scope.branchId) {
+          throw new NotFoundException();
+        }
+      },
+      audit: true,
+    });
+  }
+
+  /**
+   * Recompute tax/commission while still PAYMENT_PENDING. Once paid, fare
+   * corrections go through ledger reversal instead.
+   */
+  async adjustFare(user: AuthUser, id: string, dto: AdjustFareDto) {
+    this.assertRole(user, ADJUST_FARE_ROLES);
+    const maxCents = this.readInt('FIXED_FARE_MAX_CENTS', 50_000);
+    if (dto.subtotalCents > maxCents) {
+      throw new BadRequestException(
+        `subtotalCents cannot exceed ${maxCents}`,
+      );
+    }
+    const reason = dto.reason.trim();
+    if (!reason) throw new BadRequestException('reason is required');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const booking = await this.requireBooking(tx, id, user);
+      if (booking.status !== 'PAYMENT_PENDING') {
+        throw new ConflictException(
+          'Fare can only be adjusted while payment is pending',
+        );
+      }
+      if (booking.commissionBps == null) {
+        throw new ConflictException('Booking has no commission snapshot');
+      }
+      const taxCents = Math.round(
+        (dto.subtotalCents * booking.gstRateBps) / 10000,
+      );
+      const split = splitFare(dto.subtotalCents, booking.commissionBps);
+      const before = {
+        finalSubtotalCents: booking.finalSubtotalCents,
+        finalTaxCents: booking.finalTaxCents,
+        finalFareCents: booking.finalFareCents,
+        commissionCents: booking.commissionCents,
+        driverEarningCents: booking.driverEarningCents,
+      };
+      const after = {
+        finalSubtotalCents: dto.subtotalCents,
+        finalTaxCents: taxCents,
+        finalFareCents: dto.subtotalCents + taxCents,
+        commissionCents: split.commissionCents,
+        driverEarningCents: split.driverEarningCents,
+      };
+      const saved = await tx.booking.updateMany({
+        where: { id: booking.id, status: 'PAYMENT_PENDING' },
+        data: { ...after, version: { increment: 1 } },
+      });
+      if (saved.count !== 1) {
+        throw new ConflictException('Booking changed, retry');
+      }
+      await tx.auditLog.create({
+        data: {
+          actorUserId: user.userId,
+          actorType: 'STAFF',
+          entity: 'booking',
+          entityId: booking.id,
+          action: 'booking.fare_adjusted',
+          before: { ...before, reason: null },
+          after: { ...after, reason },
+        },
+      });
+      return {
+        id: booking.id,
+        status: booking.status,
+        driverId: booking.driverId,
+        ...after,
+      };
+    });
+    // Amounts live in pendingPayment — bump the driver snapshot so collect refreshes.
+    if (updated.driverId) {
+      await this.fleet.republishSnapshot(updated.driverId);
+    }
+    return updated;
+  }
+
+  private async collectCash(input: {
+    bookingId: string;
+    actor: { type: 'DRIVER' | 'STAFF'; userId: string };
+    assertAccess: (booking: {
+      id: string;
+      branchId: string;
+      driverId: string | null;
+      status: BookingStatus;
+      paymentMethod: string;
+    }) => void;
+    audit?: boolean;
+  }) {
+    const { paid, closed, response } = await this.prisma.$transaction(
+      async (tx) => {
+        // Serialize concurrent cash confirms so the unique payment insert never
+        // aborts a peer transaction mid-flight (Postgres 25P02).
+        await tx.$queryRaw`
+          SELECT 1 FROM "Booking" WHERE id = ${input.bookingId} FOR UPDATE
+        `;
+        const booking = await tx.booking.findUnique({
+          where: { id: input.bookingId },
+        });
+        if (!booking) throw new NotFoundException();
+        input.assertAccess(booking);
+
+        const captured = await tx.payment.findFirst({
+          where: { bookingId: booking.id, status: 'CAPTURED' },
+        });
+        // With FOR UPDATE, a concurrent loser always observes CLOSED + CAPTURED.
+        if (captured && booking.status === 'CLOSED') {
+          return {
+            paid: null,
+            closed: null,
+            response: cashCollectedResponse(booking, captured),
+          };
+        }
+
+        if (booking.status !== 'PAYMENT_PENDING') {
+          throw new ConflictException(
+            `Illegal transition ${booking.status} → PAYMENT_COMPLETED`,
+          );
+        }
+        if (booking.paymentMethod !== 'CASH') {
+          throw new ConflictException('Booking is not a cash payment');
+        }
+        if (
+          booking.finalFareCents == null ||
+          booking.finalSubtotalCents == null ||
+          booking.finalTaxCents == null ||
+          booking.commissionCents == null ||
+          booking.driverEarningCents == null ||
+          !booking.driverId
+        ) {
+          throw new ConflictException('Booking is missing settlement amounts');
+        }
+
+        const amountCents = booking.finalFareCents;
+        const idempotencyKey = `cash:${booking.id}`;
+        const outcome = await this.paymentProviders.get('CASH').createPayment({
+          bookingId: booking.id,
+          amountCents,
+          idempotencyKey,
+        });
+
+        const payment =
+          captured ??
+          (await tx.payment.create({
+            data: {
+              bookingId: booking.id,
+              method: 'CASH',
+              provider: 'CASH',
+              status: outcome.status,
+              amountCents,
+              currency: 'CAD',
+              providerRef: outcome.providerRef,
+              idempotencyKey,
+              capturedAt: new Date(),
+              createdById: input.actor.userId,
+            },
+          }));
+
+        await this.ledger.post(tx, {
+          kind: 'TRIP_CASH',
+          sourceType: 'BOOKING',
+          sourceId: booking.id,
+          branchId: booking.branchId,
+          description: 'Cash trip settlement',
+          createdById: input.actor.userId,
+          lines: cashTripLedgerLines({
+            branchId: booking.branchId,
+            driverId: booking.driverId,
+            subtotalCents: booking.finalSubtotalCents,
+            taxCents: booking.finalTaxCents,
+            commissionCents: booking.commissionCents,
+            driverEarningCents: booking.driverEarningCents,
+          }),
+        });
+
+        await tx.booking.update({
+          where: { id: booking.id },
+          data: { paymentStatus: 'PAID' },
+        });
+
+        if (input.audit && !captured) {
+          await tx.auditLog.create({
+            data: {
+              actorUserId: input.actor.userId,
+              actorType: 'STAFF',
+              entity: 'booking',
+              entityId: booking.id,
+              action: 'booking.cash_collected',
+              before: {
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+              },
+              after: {
+                status: 'CLOSED',
+                paymentStatus: 'PAID',
+                paymentId: payment.id,
+                amountCents,
+              },
+            },
+          });
+        }
+
+        const paid = await this.state.transition(
+          booking.id,
+          'PAYMENT_COMPLETED',
+          input.actor,
+          { tx },
+        );
+        const closed = await this.state.transition(
+          booking.id,
+          'CLOSED',
+          { type: 'SYSTEM' },
+          { tx },
+        );
+        const settled = await tx.booking.findUniqueOrThrow({
+          where: { id: booking.id },
+        });
+        return {
+          paid,
+          closed,
+          response: cashCollectedResponse(settled, payment),
+        };
+      },
+    );
+
+    if (paid) await this.events.emitAsync('booking.status_changed', paid);
+    if (closed) await this.events.emitAsync('booking.status_changed', closed);
+    return response;
+  }
+
   async unassign(id: string, dto: UnassignBookingDto, user: AuthUser) {
     this.assertRole(user, ASSIGN_ROLES);
     const result = await this.prisma.$transaction(async (tx) => {
@@ -605,6 +962,7 @@ export class BookingsService {
     dto: CreateBookingDto;
     user: AuthUser;
     branchId: string;
+    gstRateBps: number;
     phone: string;
     passengerId: string | null;
     scheduledAt: Date | null;
@@ -639,6 +997,7 @@ export class BookingsService {
               durationSeconds: input.seconds,
               quotedFareCents: input.subtotalCents,
               quotedTaxCents: input.taxCents,
+              gstRateBps: input.gstRateBps,
               fixedFareCents: input.dto.fixedFareCents,
               paymentMethod: input.dto.paymentMethod,
               notes: input.dto.notes?.trim(),
@@ -1164,6 +1523,14 @@ export class BookingsService {
     return Math.floor(value);
   }
 
+  private fixedFareIncludesGst() {
+    const raw = this.config
+      .get<string>('FIXED_FARE_INCLUDES_GST')
+      ?.trim()
+      .toLowerCase();
+    return raw === '1' || raw === 'true' || raw === 'yes';
+  }
+
   private serviceWindow(
     from?: string,
     to?: string,
@@ -1360,6 +1727,53 @@ function isTrackingCollision(error: unknown) {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
   if (error.code !== 'P2002') return false;
   return JSON.stringify(error.meta?.target ?? '').includes('trackingId');
+}
+
+function isUniqueConflict(error: unknown) {
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === 'P2002'
+  );
+}
+
+function cashCollectedResponse(
+  booking: {
+    id: string;
+    status: BookingStatus;
+    paymentStatus: string;
+    paymentMethod: string;
+    finalSubtotalCents: number | null;
+    finalTaxCents: number | null;
+    finalFareCents: number | null;
+    commissionBps: number | null;
+    commissionCents: number | null;
+    driverEarningCents: number | null;
+  },
+  payment: {
+    id: string;
+    status: string;
+    amountCents: number;
+    capturedAt: Date | null;
+  },
+) {
+  return {
+    id: booking.id,
+    status: booking.status,
+    paymentStatus: booking.paymentStatus,
+    paymentMethod: booking.paymentMethod,
+    finalSubtotalCents: booking.finalSubtotalCents,
+    finalTaxCents: booking.finalTaxCents,
+    finalFareCents: booking.finalFareCents,
+    commissionBps: booking.commissionBps,
+    commissionCents: booking.commissionCents,
+    driverEarningCents: booking.driverEarningCents,
+    payment: {
+      id: payment.id,
+      status: payment.status,
+      amountCents: payment.amountCents,
+      capturedAt: payment.capturedAt?.toISOString() ?? null,
+    },
+  };
 }
 
 function rethrowAssignmentConflict(error: unknown): never {

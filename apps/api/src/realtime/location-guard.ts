@@ -86,6 +86,50 @@ export function evaluateLocationPing(input: {
   };
 }
 
+export type BatchLocationPoint = {
+  lat: number;
+  lng: number;
+  accuracy: number;
+  recordedAt: string;
+};
+
+/**
+ * Offline retry path. Same accuracy / 1Hz / speed rules as the socket guard,
+ * timed off each point's recordedAt so a backlog can catch up.
+ */
+export function evaluateLocationBatch(input: {
+  points: BatchLocationPoint[];
+  nowMs: number;
+}): Array<{ lat: number; lng: number; accuracyM: number; recordedAt: string; atMs: number }> {
+  const accepted: Array<{
+    lat: number;
+    lng: number;
+    accuracyM: number;
+    recordedAt: string;
+    atMs: number;
+  }> = [];
+  let last: LocationSample | undefined;
+  for (const raw of input.points) {
+    if (raw.accuracy == null || raw.accuracy > MAX_ACCURACY_M) continue;
+    const atMs = Date.parse(raw.recordedAt);
+    if (!Number.isFinite(atMs)) continue;
+    // Reject far-future clocks; past points are fine for offline catch-up.
+    if (atMs - input.nowMs > CLIENT_CLOCK_SKEW_MS) continue;
+    if (last && atMs - last.receivedAtMs < 1000) continue;
+    const point = { lat: raw.lat, lng: raw.lng, receivedAtMs: atMs };
+    if (last && impliedSpeedMps(last, point) > MAX_SPEED_MPS) continue;
+    last = point;
+    accepted.push({
+      lat: raw.lat,
+      lng: raw.lng,
+      accuracyM: raw.accuracy,
+      recordedAt: new Date(atMs).toISOString(),
+      atMs,
+    });
+  }
+  return accepted;
+}
+
 function toRad(degrees: number) {
   return (degrees * Math.PI) / 180;
 }

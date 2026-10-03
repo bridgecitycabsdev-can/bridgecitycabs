@@ -128,6 +128,18 @@ export const driverStateSchema = z
       })
       .strict()
       .nullable(),
+    /** Oldest PAYMENT_PENDING cash booking for this driver, or null. */
+    pendingPayment: z
+      .object({
+        bookingId: z.uuid(),
+        trackingId: z.string(),
+        totalCents: z.number().int(),
+        subtotalCents: z.number().int(),
+        taxCents: z.number().int(),
+        method: z.literal('CASH'),
+      })
+      .strict()
+      .nullable(),
   })
   .strict();
 
@@ -256,7 +268,7 @@ export const offerResolvedSchema = z
 /** Lock-screen data for a driver offer. No address and no passenger name. */
 export const offerPushSchema = z
   .object({
-    type: z.literal('offer'),
+    type: z.literal('OFFER'),
     offerId: z.uuid(),
     expiresAt: z.iso.datetime(),
   })
@@ -266,6 +278,7 @@ export const PASSENGER_TRIP_TYPES = [
   'driver_assigned',
   'driver_arrived',
   'no_driver_found',
+  'trip_completed',
 ] as const;
 
 /** Passenger socket. The same facts go out as a push when the app is disconnected. */
@@ -289,6 +302,9 @@ export const passengerBookingSchema = z
     scheduledAt: z.iso.datetime().nullable(),
     quotedFareCents: z.number().int(),
     quotedTaxCents: z.number().int(),
+    finalSubtotalCents: z.number().int().nullable().optional(),
+    finalTaxCents: z.number().int().nullable().optional(),
+    finalFareCents: z.number().int().nullable().optional(),
     notes: z.string().nullable(),
     passengerName: z.string(),
     vehicleType: z

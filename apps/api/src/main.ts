@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 import { assertOtpDevCode } from './config/otp-env.js';
+import { assertFakePaymentsEnv } from './payments/fake-payments-env.js';
 import { apiValidationPipe } from './common/validation-pipe.js';
 import { allowedWsOrigins } from './realtime/allowed-origins.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
@@ -21,6 +22,7 @@ async function bootstrap() {
     ),
   );
   assertOtpDevCode();
+  assertFakePaymentsEnv();
   app.use(cookieParser());
   app.enableCors({
     origin: allowedWsOrigins(process.env.WS_ALLOWED_ORIGINS),

@@ -7,6 +7,8 @@ import {
   JOBS_QUEUE,
   LOCATION_FLUSH_EVERY_MS,
   LOCATION_RETENTION_PATTERN,
+  LEDGER_INTEGRITY_PATTERN,
+  PAYMENT_PENDING_ALERT_PATTERN,
   PRESENCE_SWEEP_EVERY_MS,
   SCHEDULED_SWEEP_EVERY_MS,
 } from './job-names.js';
@@ -42,6 +44,16 @@ export class JobsScheduler implements OnModuleInit {
       JOB_NAMES.locationRetention,
       { pattern: LOCATION_RETENTION_PATTERN, tz: 'UTC' },
       { name: JOB_NAMES.locationRetention, opts: template },
+    );
+    await this.queue.upsertJobScheduler(
+      JOB_NAMES.paymentPendingAlert,
+      { pattern: PAYMENT_PENDING_ALERT_PATTERN, tz: 'UTC' },
+      { name: JOB_NAMES.paymentPendingAlert, opts: template },
+    );
+    await this.queue.upsertJobScheduler(
+      JOB_NAMES.ledgerIntegrity,
+      { pattern: LEDGER_INTEGRITY_PATTERN, tz: 'UTC' },
+      { name: JOB_NAMES.ledgerIntegrity, opts: template },
     );
     await this.queue.upsertJobScheduler(
       JOB_NAMES.scheduledSweep,

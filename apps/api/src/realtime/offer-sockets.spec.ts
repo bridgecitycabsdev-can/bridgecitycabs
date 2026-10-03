@@ -19,7 +19,7 @@ describe('OfferAckWaiter', () => {
     const config = { get: (key: string) => (key === 'PUSH_ACK_WAIT_MS' ? wait : undefined) };
     const acks = new OfferAckWaiter(config as ConfigService, { sendOffer } as never);
     const push = {
-      type: 'offer' as const,
+      type: 'OFFER' as const,
       offerId,
       expiresAt: at,
     };
@@ -123,7 +123,7 @@ describe('OfferSocketListener', () => {
     expect(acks.arm).toHaveBeenCalledWith({
       driverId,
       userId: 'user-1',
-      push: { type: 'offer', offerId, expiresAt: at },
+      push: { type: 'OFFER', offerId, expiresAt: at },
     });
   });
 

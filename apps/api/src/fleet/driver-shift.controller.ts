@@ -2,6 +2,8 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Post } from '@nestjs/commo
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
+import { DriverConsentDto } from './dto/driver-consent.dto.js';
+import { LocationBatchDto } from './dto/location-batch.dto.js';
 import { LocationConsentDto } from './dto/location-consent.dto.js';
 import { StartShiftDto } from './dto/start-shift.dto.js';
 import { FleetStateService } from './fleet-state.service.js';
@@ -24,6 +26,18 @@ export class DriverShiftController {
   @HttpCode(HttpStatus.OK)
   locationConsent(@CurrentUser() user: AuthUser, @Body() dto: LocationConsentDto) {
     return this.consent.accept(user, dto.version);
+  }
+
+  @Post('consents')
+  @HttpCode(HttpStatus.OK)
+  consents(@CurrentUser() user: AuthUser, @Body() dto: DriverConsentDto) {
+    return this.consent.acceptTyped(user, dto);
+  }
+
+  @Post('location/batch')
+  @HttpCode(HttpStatus.OK)
+  locationBatch(@CurrentUser() user: AuthUser, @Body() dto: LocationBatchDto) {
+    return this.fleet.recordLocationBatch(user, dto.points);
   }
 
   @Post('shift/start')

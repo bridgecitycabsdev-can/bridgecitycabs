@@ -3,15 +3,19 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  Inject,
   NotFoundException,
   Query,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { Redis } from 'ioredis';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { STAFF_ROLES } from '../common/staff-roles.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { REDIS } from '../redis/redis.constants.js';
+import { paymentPendingAlertKey } from '../redis/redis.keys.js';
 import { DispatchConfigQuery } from './dto/dispatch-config-query.dto.js';
 
 @Controller('config')
@@ -20,6 +24,7 @@ export class DispatchConfigController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    @Inject(REDIS) private readonly redis: Redis,
   ) {}
 
   @Get('dispatch')
@@ -36,6 +41,8 @@ export class DispatchConfigController {
       },
     });
     if (!branch) throw new NotFoundException();
+    const rawAlert = await this.redis.get(paymentPendingAlertKey(branchId));
+    const paymentPendingAlertCount = Math.max(0, Number(rawAlert) || 0);
     return {
       scheduleMinLeadMinutes: readInt(this.config, 'BOOKING_MIN_LEAD_MINUTES', 15),
       scheduleMaxDays: readInt(this.config, 'BOOKING_MAX_ADVANCE_DAYS', 30),
@@ -43,6 +50,8 @@ export class DispatchConfigController {
       fixedFareMaxCents: readInt(this.config, 'FIXED_FARE_MAX_CENTS', 50_000),
       timezone: branch.timezone,
       autoDispatchDefault: branch.autoDispatchDefault,
+      /** Stuck PAYMENT_PENDING count from the daily job. Never auto-confirms cash. */
+      paymentPendingAlertCount,
       branchCenter:
         branch.centerLat == null || branch.centerLng == null
           ? null

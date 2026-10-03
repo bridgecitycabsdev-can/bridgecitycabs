@@ -5,8 +5,10 @@ import { DispatchModule } from '../dispatch/dispatch.module.js';
 import { QueueModule } from './queue.module.js';
 import { JobsScheduler } from './jobs.scheduler.js';
 import { JobsWorker } from './jobs.worker.js';
+import { LedgerIntegrityService } from './ledger-integrity.service.js';
 import { LocationFlushService } from './location-flush.service.js';
 import { LocationRetentionService } from './location-retention.service.js';
+import { PaymentPendingAlertService } from './payment-pending-alert.service.js';
 import { PresenceSweepService } from './presence-sweep.service.js';
 
 const workersEnabled = process.env.NODE_ENV !== 'test';
@@ -22,8 +24,16 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     PresenceSweepService,
     LocationFlushService,
     LocationRetentionService,
+    PaymentPendingAlertService,
+    LedgerIntegrityService,
     ...(workersEnabled ? [JobsScheduler, JobsWorker] : []),
   ],
-  exports: [PresenceSweepService, LocationFlushService, LocationRetentionService],
+  exports: [
+    PresenceSweepService,
+    LocationFlushService,
+    LocationRetentionService,
+    PaymentPendingAlertService,
+    LedgerIntegrityService,
+  ],
 })
 export class JobsModule {}

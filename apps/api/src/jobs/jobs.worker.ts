@@ -6,6 +6,8 @@ import { DispatchJobsService } from '../dispatch/dispatch-jobs.service.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 import { LocationFlushService } from './location-flush.service.js';
 import { LocationRetentionService } from './location-retention.service.js';
+import { LedgerIntegrityService } from './ledger-integrity.service.js';
+import { PaymentPendingAlertService } from './payment-pending-alert.service.js';
 import { PresenceSweepService } from './presence-sweep.service.js';
 
 @Processor(JOBS_QUEUE, { concurrency: 1 })
@@ -17,6 +19,8 @@ export class JobsWorker extends WorkerHost {
     private readonly locations: LocationFlushService,
     private readonly idempotency: IdempotencyService,
     private readonly retention: LocationRetentionService,
+    private readonly paymentPendingAlert: PaymentPendingAlertService,
+    private readonly ledgerIntegrity: LedgerIntegrityService,
     private readonly dispatch: DispatchJobsService,
   ) {
     super();
@@ -35,6 +39,12 @@ export class JobsWorker extends WorkerHost {
         return;
       case JOB_NAMES.locationRetention:
         await this.retention.purge();
+        return;
+      case JOB_NAMES.paymentPendingAlert:
+        await this.paymentPendingAlert.sweep();
+        return;
+      case JOB_NAMES.ledgerIntegrity:
+        await this.ledgerIntegrity.check();
         return;
       case JOB_NAMES.dispatchAttempt: {
         const data = jobData(job);

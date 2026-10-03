@@ -18,8 +18,10 @@ class ActiveBookingController extends AsyncNotifier<ActiveBooking?> {
           .dio
           .get<dynamic>('/passenger/bookings/active');
       final booking = ActiveBooking.tryParse(response.data);
-      if (booking == null || booking.isTerminal) return null;
-      return booking;
+      if (booking == null) return null;
+      // Keep receipt trips until the API drops them (CLOSED).
+      if (booking.isLive || booking.isReceipt) return booking;
+      return null;
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) return null;
       rethrow;
@@ -27,11 +29,11 @@ class ActiveBookingController extends AsyncNotifier<ActiveBooking?> {
   }
 
   void apply(ActiveBooking booking) {
-    if (booking.isTerminal) {
-      state = const AsyncData(null);
+    if (booking.isLive || booking.isReceipt) {
+      state = AsyncData(booking);
       return;
     }
-    state = AsyncData(booking);
+    state = const AsyncData(null);
   }
 
   void clear() {

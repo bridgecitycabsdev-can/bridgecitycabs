@@ -88,6 +88,9 @@ function harness() {
     vehicleType: {
       findUnique: vi.fn(async () => ({ id: vehicleTypeId, active: true })),
     },
+    branch: {
+      findUnique: vi.fn(async () => ({ id: 'branch-1', gstRateBps: 500 })),
+    },
     booking,
     $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) =>
       fn(tx),
@@ -152,6 +155,7 @@ describe('PassengerBookingsService', () => {
           passengerPhone: '+14035550100',
           quotedFareCents: 1500,
           quotedTaxCents: 75,
+          gstRateBps: 500,
           distanceMeters: 1000,
         }),
       }),

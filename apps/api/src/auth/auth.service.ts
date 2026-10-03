@@ -201,7 +201,10 @@ export class AuthService {
       where: { tokenHash: this.hashToken(refreshToken), revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    await this.prisma.deviceToken.deleteMany({ where: { userId } });
+    await this.prisma.deviceToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
     return { success: true };
   }
 

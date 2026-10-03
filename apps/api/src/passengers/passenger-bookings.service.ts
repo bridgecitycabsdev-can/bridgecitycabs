@@ -85,9 +85,9 @@ export class PassengerBookingsService {
         },
       );
     }
-    const branchId = await this.branchIdFor(user, dto.branchId);
+    const branch = await this.branchFor(user, dto.branchId);
     const accepted = this.fares.acceptQuote(dto.quoteToken, {
-      branchId,
+      branchId: branch.id,
       vehicleTypeId: dto.vehicleTypeId,
       zone: dto.zone,
       stops: dto.stops,
@@ -98,7 +98,7 @@ export class PassengerBookingsService {
         ApiCode.QUOTE_EXPIRED,
         'Quote expired',
         undefined,
-        await this.fares.quotes({ stops: dto.stops, branchId }, user),
+        await this.fares.quotes({ stops: dto.stops, branchId: branch.id }, user),
       );
     }
 
@@ -112,6 +112,8 @@ export class PassengerBookingsService {
     const inserted = await this.insert({
       dto,
       user,
+      branchId: branch.id,
+      gstRateBps: branch.gstRateBps,
       passengerId: passenger.id,
       passengerName,
       phone,
@@ -259,6 +261,8 @@ export class PassengerBookingsService {
   private async insert(input: {
     dto: PassengerCreateBookingDto;
     user: AuthUser;
+    branchId: string;
+    gstRateBps: number;
     passengerId: string;
     passengerName: string;
     phone: string;
@@ -270,7 +274,6 @@ export class PassengerBookingsService {
     subtotalCents: number;
     taxCents: number;
   }) {
-    const branchId = await this.branchIdFor(input.user, input.dto.branchId);
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
         return await this.prisma.$transaction(async (tx) => {
@@ -287,7 +290,7 @@ export class PassengerBookingsService {
           const created = await tx.booking.create({
             data: {
               trackingId: newTrackingId(),
-              branchId,
+              branchId: input.branchId,
               source: 'PASSENGER_APP',
               assignMode: 'AUTO',
               status: input.initial,
@@ -304,6 +307,7 @@ export class PassengerBookingsService {
               durationSeconds: input.seconds,
               quotedFareCents: input.subtotalCents,
               quotedTaxCents: input.taxCents,
+              gstRateBps: input.gstRateBps,
               paymentMethod: input.dto.paymentMethod,
               notes: input.dto.notes?.trim(),
               stops: {
@@ -351,10 +355,15 @@ export class PassengerBookingsService {
     throw new InternalServerErrorException('Could not allocate a tracking id');
   }
 
-  private async branchIdFor(user: AuthUser, requested?: string) {
-    if (user.branchId) return user.branchId;
-    if (requested) return requested;
-    throw new BadRequestException('branchId is required');
+  private async branchFor(user: AuthUser, requested?: string) {
+    const id = user.branchId ?? requested;
+    if (!id) throw new BadRequestException('branchId is required');
+    const branch = await this.prisma.branch.findUnique({
+      where: { id },
+      select: { id: true, gstRateBps: true },
+    });
+    if (!branch) throw new NotFoundException();
+    return branch;
   }
 
   private async present(id: string) {

@@ -111,6 +111,8 @@ describe('BookingsService tracking id', () => {
       { acceptQuote, quotes } as never,
       { cancel: async () => undefined } as never,
       { enqueueAttempt: async () => undefined } as never,
+      { post: vi.fn() } as never,
+      { get: vi.fn() } as never,
     );
     return {
       service,
@@ -197,6 +199,7 @@ describe('BookingsService tracking id', () => {
           durationSeconds: 1020,
           quotedFareCents: 2510,
           quotedTaxCents: 126,
+          gstRateBps: 500,
         }),
       }),
     );

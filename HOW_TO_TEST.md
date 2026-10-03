@@ -26,16 +26,67 @@ pnpm --filter api test:e2e
 (cd apps/passenger-app && flutter test)
 ```
 
-## Emulator location
-
-Emulators default to California, so Lethbridge drivers never match. Pin coordinates explicitly (longitude first, then latitude):
+## Backend and ledger
 
 ```bash
-adb -s emulator-5554 emu geo fix -112.8418 49.6935    # driver
-adb -s emulator-5556 emu geo fix -112.8300 49.6950    # passenger, ~1 km away
+pnpm --filter api test:e2e
+docker compose exec postgres psql -U bridgecabs -d bridgecabs
 ```
 
-In the iOS Simulator: **Features → Location → Custom Location** (same lat/lng).
+```sql
+-- the invariant: this must always be 0
+select sum("amountCents") from "LedgerEntry";
+
+-- one trip's postings
+select a.key, e."amountCents" from "LedgerEntry" e
+join "FinancialAccount" a on a.id = e."accountId" where e."transactionId" = '<id>';
+
+-- balances, positive means the company owes the driver
+select a.key, -sum(e."amountCents") as balance from "LedgerEntry" e
+join "FinancialAccount" a on a.id = e."accountId" group by a.key;
+
+-- these three must each ERROR
+update "LedgerEntry" set "amountCents" = 1;
+delete from "LedgerTransaction";
+begin; insert into "LedgerEntry"(id,"transactionId","accountId","amountCents") values (gen_random_uuid(),'<txn>','<acct>',100); commit;
+```
+
+### Sim driver (full cash trip)
+
+From `apps/api`, with the API up:
+
+```bash
+pnpm exec tsx scripts/sim-driver.ts --phone +14035550100 --behavior accept --vehicle LTH111
+# After accept, walk arriving → arrived → start → complete → cash-collected and print balance:
+pnpm exec tsx scripts/sim-driver.ts --phone +14035550100 --complete --vehicle LTH111
+pnpm exec tsx scripts/sim-driver.ts --phone +14035550101 --behavior ignore --vehicle LTH112
+```
+
+## Push
+
+1. Firebase console → Messaging → **Send test message** to a device token (quick sanity check).
+2. Real payload (incl. TTL) through `PushService`:
+
+```bash
+cd apps/api
+pnpm exec tsx scripts/send-test-push.ts <userId>
+pnpm exec tsx scripts/send-test-push.ts <userId> --ttl-seconds 30
+```
+
+Uses `FIREBASE_SERVICE_ACCOUNT_JSON` when set; otherwise logs via the console provider. Android emulators need a **Google Play** image for FCM. iOS needs a **physical phone**.
+
+## Background location (Android emulator)
+
+```bash
+adb -s emulator-5554 emu geo fix -112.8418 49.6935          # longitude first
+adb -s emulator-5554 shell input keyevent KEYCODE_HOME       # send the app to the background
+# should keep changing while on shift:
+watch -n 2 "docker compose exec -T redis redis-cli HGET driver:<id> ts"
+adb -s emulator-5554 shell dumpsys deviceidle force-idle     # simulate Doze
+adb logcat | grep -i geolocator
+```
+
+Change the location with another `geo fix` and confirm the map on the web console follows it. Repeat once on a **real phone with the screen locked** — emulators are far more forgiving.
 
 List devices, then run each app:
 
@@ -44,7 +95,7 @@ flutter devices
 flutter run -d <id> --dart-define=API_BASE_URL=http://10.0.2.2:3000
 ```
 
-Use `http://10.0.2.2:3000` on an Android emulator. On an iOS simulator use `http://localhost:3000` (or omit the define and rely on the app default). A physical phone needs your LAN or tunnel URL for both `API_BASE_URL` and `WS_URL`.
+Use `http://10.0.2.2:3000` on an Android emulator. On an iOS simulator use `http://localhost:3000`. A physical phone needs your LAN or tunnel URL for both `API_BASE_URL` and `WS_URL`.
 
 ## Faster timeout drills
 
@@ -59,55 +110,34 @@ Restart the API, run the timeout/no-driver flows, then put the values back (defa
 
 ## End-of-day verification
 
-Assume migrate + seed have been applied (`dispatch_ops`, `dispatch_guards`), and Google keys are restricted (Places/Routes server keys, Android Maps by package+SHA-1, iOS Maps by bundle ID) with quotas and a billing alert. Nothing secret belongs in git.
+Assume `money_core` and `money_guards` migrations are applied, and Google/Firebase keys are restricted. Nothing secret belongs in git.
 
-### Sim drivers (Lethbridge)
+1. Run one full trip with the simulator (`--complete`) or with the driver app open. The web Money section shows the final fare, and Postgres shows exactly one balanced `TRIP_CASH` transaction.
+2. Tap **Cash collected** twice quickly → a single payment and ledger transaction.
+3. Driver balance matches your hand calculation (`GET /driver/earnings` or the SQL above).
+4. Put the driver app in the background, create a job → notification arrives → tap opens the offer screen with the right countdown.
+5. Kill the app during an active job, restart → returns to the trip or collect screen.
+6. Reverse the transaction as an accounts user → balance returns to zero.
+7. `select sum("amountCents") from "LedgerEntry";` → **0**.
 
-From `apps/api`, with the API up:
+### Web console (dispatch)
 
-```bash
-pnpm exec tsx scripts/sim-driver.ts --phone +14035550100 --behavior accept --vehicle LTH111
-pnpm exec tsx scripts/sim-driver.ts --phone +14035550101 --behavior ignore --vehicle LTH112
-```
+1. Book an **Auto** job → Unassigned → Assigned when a driver accepts.
+2. Double-click Book → still one booking (idempotency).
+3. Book a **Manual** job → Assign from details.
+4. Edit notes on an assigned job → driver snapshot updates.
+5. No drivers online → **NO_DRIVER_FOUND** timeout modal.
 
-Both loop near downtown Lethbridge. Keep one accepting and one ignoring for the Auto job path.
+## Done when
 
-### Web console
-
-1. Book an **Auto** job. Quote appears → Book succeeds → job under **Unassigned**, then **Assigned** when the accepting sim takes it.
-2. Double-click Book → still one booking. DevTools Network → Offline → Book → Online → retry → still one booking (idempotency).
-3. Book a **Manual** job → open details → **Assign** → pick a ranked candidate.
-4. Edit notes on an assigned job → driver `driver:state` / snapshot shows the note change.
-5. Stop both sims → book Auto → wait for **NO_DRIVER_FOUND**. Timeout modal fills; badge and beep fire (enable Sound alerts first). **Retry search** and **Cancel**.
-
-### Driver app (Android emulator)
-
-Accept sim off. Pin location (`geo fix -112.8418 49.6935`). Book from the web console. Offer shows a server-clock countdown → Accept → Navigate → Arrived → Start → Complete.
-
-### Passenger app (second emulator)
-
-Pin ~1 km away (`geo fix -112.8300 49.6950`). Search → choose a ride → book → see driver assigned. Try a second booking → UI explains the conflict. Cancel the active trip.
-
-### Postgres AuditLog
-
-```sql
-SELECT action, entity, "createdAt" FROM "AuditLog" ORDER BY "createdAt" DESC LIMIT 20;
--- Expect booking.updated / booking.fixed_fare_set rows for edits and fixed fares.
-UPDATE "AuditLog" SET action = 'tamper' WHERE id = '<any id>';  -- must fail or be disallowed by ops policy
-```
-
-There is no API to update or delete audit rows; the table is append-only.
-
-### Done when
-
-- [ ] `dispatch_ops` and `dispatch_guards` migrations applied; seeds updated
-- [ ] Places proxy, batch quotes, and quote tokens work; no Google key reaches a client
-- [ ] Routes failure falls back to ESTIMATE; dispatchers can still book
-- [ ] List filters, candidates, PATCH with versioning, retry-search, dispatch-mode, and driver release work
-- [ ] Web New Job: multiple drafts, quote, idempotent booking, server error mapping
-- [ ] Details modal: assign by list and map, edit, cancel
-- [ ] Unassigned and closed modals; audible timeout alert
-- [ ] Driver app: offer with server-clock countdown; trip completes
-- [ ] Passenger app: book and track (map may be a placeholder)
-- [ ] Every audited action writes an immutable row
-- [ ] All three key types restricted; quotas + billing alert; secrets out of git
+- [ ] `money_core` and `money_guards` migrations applied
+- [ ] Balanced, immutable ledger with idempotent posting, proven by tests
+- [ ] Property tests pass for fare splitting
+- [ ] Trip completion finalizes fare server-side and the cash flow closes the booking
+- [ ] Reversal, adjust-fare, and balance endpoints work with the right roles
+- [ ] Driver snapshot carries `pendingPayment` and the collect screen survives an app restart
+- [ ] Device tokens follow the logged-in user and are revoked on logout
+- [ ] An offer push arrives with the app backgrounded and opens the right screen
+- [ ] Driver location streams with the app backgrounded on Android, with consent recorded first
+- [ ] No amount is ever accepted from a client, and no secrets are in git
+- [ ] Committed as `feat(api,mobile): ledger, cash payments, push and background location`

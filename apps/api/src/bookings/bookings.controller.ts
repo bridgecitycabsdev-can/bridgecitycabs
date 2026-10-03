@@ -16,6 +16,7 @@ import { Roles } from '../common/roles.decorator.js';
 import { STAFF_ROLES } from '../common/staff-roles.js';
 import { Idempotent } from '../idempotency/idempotency.decorator.js';
 import { BookingsService } from './bookings.service.js';
+import { AdjustFareDto } from './dto/adjust-fare.dto.js';
 import { AssignBookingDto } from './dto/assign-booking.dto.js';
 import { DispatchModeDto } from './dto/dispatch-mode.dto.js';
 import { BookingQuery } from './dto/booking-query.dto.js';
@@ -127,5 +128,26 @@ export class BookingsController {
     @Body() dto: BookingStatusDto,
   ) {
     return this.bookings.setStatus(id, dto, user);
+  }
+
+  @Post(':id/payment/cash')
+  @HttpCode(HttpStatus.OK)
+  @Roles('branch_admin', 'accounts_admin', 'super_admin')
+  collectCash(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.bookings.collectCashAsStaff(user, id);
+  }
+
+  @Post(':id/adjust-fare')
+  @HttpCode(HttpStatus.OK)
+  @Roles('branch_admin', 'accounts_admin')
+  adjustFare(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: AdjustFareDto,
+  ) {
+    return this.bookings.adjustFare(user, id, dto);
   }
 }

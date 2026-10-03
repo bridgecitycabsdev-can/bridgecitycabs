@@ -3,9 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import 'features/collect/collect_page.dart';
+import 'features/earnings/earnings_page.dart';
 import 'features/home/home_page.dart';
 import 'features/offer/offer_page.dart';
 import 'features/trip/trip_page.dart';
+import 'lifecycle.dart';
+import 'push.dart';
 import 'realtime.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -23,15 +27,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       final signedIn = session.value == true;
       final signingIn =
           location == '/phone' || location == '/code' || location == '/boot';
-      if (!signedIn && (location == '/home' || location == '/offer' || location == '/trip')) {
-        return '/phone';
-      }
+      const protected = {
+        '/home',
+        '/offer',
+        '/trip',
+        '/collect',
+        '/earnings',
+      };
+      if (!signedIn && protected.contains(location)) return '/phone';
       if (!signedIn && location == '/boot') return '/phone';
       if (signedIn && signingIn) return '/home';
       if (!signedIn) return null;
 
       final driver = ref.read(driverStateProvider).value;
       if (driver == null) return null;
+      // Offer and live trip keep priority over collect cash.
       final target = switch (driver.status) {
         DriverStatus.offered => '/offer',
         DriverStatus.assigned ||
@@ -39,9 +49,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         DriverStatus.arrived ||
         DriverStatus.onTrip =>
           '/trip',
-        _ => '/home',
+        _ => driver.pendingPayment != null ? '/collect' : '/home',
       };
-      return state.matchedLocation == target ? null : target;
+      if (location == '/earnings' && target == '/home') return null;
+      return location == target ? null : target;
     },
     routes: [
       GoRoute(
@@ -61,6 +72,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/home', builder: (context, state) => const DriverHomePage()),
       GoRoute(path: '/offer', builder: (context, state) => const OfferPage()),
       GoRoute(path: '/trip', builder: (context, state) => const TripPage()),
+      GoRoute(path: '/collect', builder: (context, state) => const CollectPage()),
+      GoRoute(
+        path: '/earnings',
+        builder: (context, state) => const EarningsPage(),
+      ),
     ],
   );
 });
@@ -71,6 +87,8 @@ class DriverApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(driverRealtimeProvider);
+    ref.watch(driverPushProvider);
+    ref.watch(driverLifecycleProvider);
     return MaterialApp.router(
       title: 'BridgeCabs Driver',
       theme: bridgeTheme(Brightness.light),

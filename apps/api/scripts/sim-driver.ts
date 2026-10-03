@@ -10,7 +10,8 @@ const BEHAVIORS = ['accept', 'decline', 'ignore'] as const;
 type Behavior = (typeof BEHAVIORS)[number];
 
 const phone = flag('phone') ?? process.env.SIM_DRIVER_PHONE ?? '+14035550100';
-const behavior = readBehavior();
+const completeTrip = hasFlag('complete');
+const behavior = completeTrip ? 'accept' : readBehavior();
 const delaySeconds = readDelay();
 
 /** Tight square around downtown Lethbridge so these drivers stay in one search band. */
@@ -30,7 +31,8 @@ const shift = await api('/api/v1/driver/shift/start', {
   body: JSON.stringify(vehicleId ? { vehicleId } : {}),
 });
 console.log(
-  `driver ${phone} behavior=${behavior} delay=${delaySeconds}s shift ${JSON.stringify(shift)}`,
+  `driver ${phone} behavior=${behavior} delay=${delaySeconds}s` +
+    `${completeTrip ? ' complete=true' : ''} shift ${JSON.stringify(shift)}`,
 );
 
 const socket = io(`${apiOrigin()}/driver`, {
@@ -95,11 +97,65 @@ async function respond(offerId: string) {
       body: behavior === 'decline' ? JSON.stringify({ reason: 'Not taking this one' }) : undefined,
     });
     console.log(`${behavior} ${offerId} ${JSON.stringify(result)}`);
+    if (completeTrip && behavior === 'accept') {
+      await walkTripToCashCollected(result);
+    }
   } catch (error) {
     console.error(
       `${behavior} ${offerId} failed: ${error instanceof Error ? error.message : 'unknown error'}`,
     );
   }
+}
+
+/** arriving → arrived → start → complete → cash-collected, then print balance. */
+async function walkTripToCashCollected(acceptResult: unknown) {
+  const bookingId = bookingIdFromSnapshot(acceptResult);
+  if (!bookingId) {
+    throw new Error('Accept succeeded but snapshot had no booking.id');
+  }
+  const headers = bearer(session.accessToken);
+  const steps = [
+    'arriving',
+    'arrived',
+    'start',
+    'complete',
+    'cash-collected',
+  ] as const;
+  for (const name of steps) {
+    await sleep(400);
+    const body = await api(`/api/v1/driver/bookings/${bookingId}/${name}`, {
+      method: 'POST',
+      headers,
+    });
+    console.log(`trip ${name} ${JSON.stringify(body)}`);
+  }
+  const earnings = (await api('/api/v1/driver/earnings', { headers })) as {
+    balanceCents?: number;
+    netEarningsCents?: number;
+    grossSubtotalCents?: number;
+    commissionCents?: number;
+  };
+  console.log(
+    `balanceCents=${earnings.balanceCents} ` +
+      `(positive = company owes driver) ` +
+      `netEarningsCents=${earnings.netEarningsCents} ` +
+      `grossSubtotalCents=${earnings.grossSubtotalCents} ` +
+      `commissionCents=${earnings.commissionCents}`,
+  );
+}
+
+function bookingIdFromSnapshot(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined;
+  const booking = (data as { booking?: { id?: unknown } }).booking;
+  return typeof booking?.id === 'string' ? booking.id : undefined;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function hasFlag(name: string) {
+  return process.argv.includes(`--${name}`);
 }
 
 function readBehavior(): Behavior {
@@ -142,9 +198,9 @@ async function acceptLocationNotice(accessToken: string) {
   const notice = (await api('/api/v1/driver/location-notice', {
     headers: bearer(accessToken),
   })) as { version: string };
-  await api('/api/v1/driver/location-consent', {
+  await api('/api/v1/driver/consents', {
     method: 'POST',
     headers: bearer(accessToken),
-    body: JSON.stringify({ version: notice.version }),
+    body: JSON.stringify({ type: 'LOCATION_TRACKING', version: notice.version }),
   });
 }

@@ -72,6 +72,18 @@ describe('PassengerPushListener', () => {
     expect(JSON.stringify(message)).not.toMatch(/address|passengerName|phone|City Hall/i);
   });
 
+  it('pushes trip completed when the passenger is disconnected', async () => {
+    const { alerts, push } = listener(false);
+    await alerts.onStatus({ bookingId, to: 'TRIP_COMPLETED' });
+    expect(push.sendToUser).toHaveBeenCalledWith('user-1', {
+      title: 'Trip completed',
+      body: 'Your trip has ended',
+      data: { bookingId, type: 'trip_completed' },
+      highPriority: true,
+      timeSensitive: false,
+    });
+  });
+
   it('stays quiet for other statuses and for bookings with no account', async () => {
     const searching = listener(false);
     await searching.alerts.onStatus({ bookingId, to: 'SEARCHING_DRIVER' });

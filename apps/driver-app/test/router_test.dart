@@ -83,6 +83,7 @@ class _FixedDriver extends DriverStateController {
               quotedFareCents: 1000,
               notes: null,
             ),
+      pendingPayment: null,
       offer: status == DriverStatus.offered
           ? Offer(
               id: '22222222-2222-4222-8222-222222222222',

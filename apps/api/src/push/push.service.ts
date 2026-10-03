@@ -6,7 +6,9 @@ import { PUSH_PROVIDER, type PushMessage, type PushProvider } from './push-provi
 export const OFFER_PUSH_TITLE = 'New ride request';
 export const OFFER_PUSH_BODY = 'Open the app to respond';
 
+/** Notification + data for a killed driver app. TTL matches offer remaining time. */
 export function offerNotification(payload: OfferPush): PushMessage {
+  const expiresAtMs = Date.parse(payload.expiresAt);
   return {
     title: OFFER_PUSH_TITLE,
     body: OFFER_PUSH_BODY,
@@ -17,6 +19,9 @@ export function offerNotification(payload: OfferPush): PushMessage {
     },
     highPriority: true,
     timeSensitive: true,
+    androidChannelId: 'offers',
+    collapseKey: payload.offerId,
+    expiresAtMs: Number.isFinite(expiresAtMs) ? expiresAtMs : undefined,
   };
 }
 
@@ -38,7 +43,11 @@ export class PushService {
     try {
       const invalid = await this.provider.send(targets, message);
       if (!invalid.length) return;
-      await this.prisma.deviceToken.deleteMany({ where: { token: { in: invalid } } });
+      // Soft-revoke: FCM said unregistered / invalid.
+      await this.prisma.deviceToken.updateMany({
+        where: { token: { in: invalid }, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     } catch (error) {
       this.logger.warn(
         `Push "${message.title}" failed: ${error instanceof Error ? error.message : 'unknown error'}`,

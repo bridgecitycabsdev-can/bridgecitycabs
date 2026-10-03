@@ -128,6 +128,29 @@ class DriverStateController extends AsyncNotifier<DriverSnapshot> {
     await reload();
   }
 
+  /// Confirms cash with retry/backoff on network errors. Caller waits until
+  /// [pendingPayment] clears on the next snapshot before navigating away.
+  Future<void> collectCash(String bookingId) async {
+    var delayMs = 500;
+    Object? lastError;
+    for (var attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await ref
+            .read(apiClientProvider)
+            .dio
+            .post<dynamic>('/driver/bookings/$bookingId/cash-collected');
+        await reload();
+        return;
+      } on DioException catch (error) {
+        lastError = error;
+        if (!_isRetryableNetwork(error) || attempt == 4) rethrow;
+        await Future<void>.delayed(Duration(milliseconds: delayMs));
+        delayMs *= 2;
+      }
+    }
+    if (lastError != null) throw lastError;
+  }
+
   Future<void> releaseBooking(String bookingId, String reason) async {
     await ref.read(apiClientProvider).dio.post<dynamic>(
       '/driver/bookings/$bookingId/release',
@@ -138,6 +161,13 @@ class DriverStateController extends AsyncNotifier<DriverSnapshot> {
 
   bool isGone(Object error) {
     return error is DioException && error.response?.statusCode == 410;
+  }
+
+  bool _isRetryableNetwork(DioException error) {
+    return error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.connectionError;
   }
 
   void _apply(DriverSnapshot snapshot) {

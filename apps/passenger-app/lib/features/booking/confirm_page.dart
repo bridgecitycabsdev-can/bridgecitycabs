@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../push.dart';
 import 'draft.dart';
 import 'money.dart';
 
@@ -51,6 +52,9 @@ class _ConfirmPageState extends ConsumerState<ConfirmPage> {
       }
       ref.read(activeBookingProvider.notifier).apply(booking);
       notifier.reset();
+      // Ask once after the first booking; system won't re-prompt if decided.
+      await requestPassengerPushAfterBooking(ref);
+      if (!mounted) return;
       if (booking.isSearching) {
         context.go('/searching');
       } else {

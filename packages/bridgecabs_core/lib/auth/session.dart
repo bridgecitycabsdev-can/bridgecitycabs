@@ -74,4 +74,17 @@ class SessionController extends AsyncNotifier<bool> {
     await tokens.clear();
     state = const AsyncData(false);
   }
+
+  /// Soft-revoke FCM then clear the session. Apps should prefer this over
+  /// [signOut] when push is wired so DELETE /devices stays authorized.
+  Future<void> signOutWithPushCleanup(
+    Future<void> Function() unregisterPush,
+  ) async {
+    try {
+      await unregisterPush();
+    } catch (_) {
+      // Push cleanup is best-effort.
+    }
+    await signOut();
+  }
 }

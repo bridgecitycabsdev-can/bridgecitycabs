@@ -114,6 +114,8 @@ function harness(current = row()) {
     { quotes } as never,
     { cancel: vi.fn() } as never,
     dispatch as never,
+    { post: vi.fn() } as never,
+    { get: vi.fn() } as never,
   );
   return { service, prisma, tx, state, events, quotes, dispatch, fleet };
 }

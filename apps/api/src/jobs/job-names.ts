@@ -5,6 +5,8 @@ export const JOB_NAMES = {
   locationFlush: 'location-flush',
   idempotencyPurge: 'idempotency-purge',
   locationRetention: 'location-retention',
+  paymentPendingAlert: 'payment-pending-alert',
+  ledgerIntegrity: 'ledger-integrity',
   offerExpire: 'offer-expire',
   dispatchAttempt: 'dispatch-attempt',
   scheduledRelease: 'scheduled-release',
@@ -20,3 +22,7 @@ export const DISPATCH_RETRY_MS = 5_000;
 /** Midnight UTC. Retention follows ten minutes later. */
 export const IDEMPOTENCY_PURGE_PATTERN = '0 0 * * *';
 export const LOCATION_RETENTION_PATTERN = '10 0 * * *';
+/** 06:00 UTC — count stuck PAYMENT_PENDING bookings for the dispatch header. */
+export const PAYMENT_PENDING_ALERT_PATTERN = '0 6 * * *';
+/** 06:15 UTC — global ledger sum must be zero. */
+export const LEDGER_INTEGRITY_PATTERN = '15 6 * * *';

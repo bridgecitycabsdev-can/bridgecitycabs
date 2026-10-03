@@ -26,6 +26,12 @@ const TRIP_PUSH: Partial<
     title: 'No driver found',
     body: 'We could not find a driver',
   },
+  // Trip finished — passenger receipt / next steps. Keep copy generic.
+  TRIP_COMPLETED: {
+    type: 'trip_completed',
+    title: 'Trip completed',
+    body: 'Your trip has ended',
+  },
 };
 
 @Injectable()

@@ -75,7 +75,7 @@ export class OfferSocketListener {
         driverId: event.driverId,
         userId: row.driver.userId,
         push: {
-          type: 'offer',
+          type: 'OFFER',
           offerId: event.offerId,
           expiresAt: row.expiresAt.toISOString(),
         },

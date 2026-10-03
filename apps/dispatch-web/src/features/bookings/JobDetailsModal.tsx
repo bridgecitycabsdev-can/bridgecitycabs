@@ -5,8 +5,10 @@ import { Button } from '@/components/ui/button'
 import { AssignPanel } from '@/features/bookings/AssignPanel'
 import {
   CANCEL_REASONS,
+  canAdjustFare,
   canAssign,
   canCancel,
+  canConfirmCash,
   canSwitchMode,
   canUnassign,
   dropoffStop,
@@ -17,6 +19,11 @@ import {
   pickupStop,
   secondsLeft,
 } from '@/features/bookings/booking-detail'
+import {
+  adjustBookingFare,
+  confirmCashPayment,
+  paymentStatusLabel,
+} from '@/features/bookings/money-actions'
 import { SearchPanel } from '@/features/bookings/SearchPanel'
 import { useBookingUi } from '@/features/bookings/selection'
 import { useBookingDetail } from '@/features/bookings/use-booking-detail'
@@ -277,13 +284,88 @@ function JobPanel({ bookingId, timezone }: { bookingId: string; timezone: string
         <Cell label="To" value={dropoff?.address ?? '—'} />
       </dl>
 
-      <section className="grid gap-2 sm:grid-cols-3">
-        <Money label="Quoted" value={formatMoney(booking.quotedFareCents + booking.quotedTaxCents)} />
-        <Money
-          label="Fixed"
-          value={booking.fixedFareCents != null ? formatMoney(booking.fixedFareCents) : '—'}
-        />
-        <Money label="Paid" value="—" />
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold">Money</h3>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Money
+            label="Quoted"
+            value={formatMoney(booking.quotedFareCents + booking.quotedTaxCents)}
+          />
+          <Money
+            label="Fixed"
+            value={booking.fixedFareCents != null ? formatMoney(booking.fixedFareCents) : '—'}
+          />
+          <Money label="Payment" value={paymentStatusLabel(booking.paymentStatus)} />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Money label="Subtotal" value={formatMoney(booking.finalSubtotalCents)} />
+          <Money label="GST" value={formatMoney(booking.finalTaxCents)} />
+          <Money label="Total" value={formatMoney(booking.finalFareCents)} />
+        </div>
+        {booking.status === 'PAYMENT_PENDING' ? (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {canConfirmCash(role, booking.status) ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy != null}
+                onClick={() =>
+                  void runAction('cash', async () => {
+                    const ok = await confirmCashPayment(bookingId)
+                    if (!ok) {
+                      setToast('Could not confirm cash')
+                      return false
+                    }
+                    setToast('Cash confirmed')
+                    return true
+                  })
+                }
+              >
+                {busy === 'cash' ? 'Confirming…' : 'Confirm cash'}
+              </Button>
+            ) : null}
+            {canAdjustFare(role, booking.status) ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy != null}
+                onClick={() =>
+                  void runAction('adjust', async () => {
+                    const current =
+                      booking.finalSubtotalCents != null
+                        ? (booking.finalSubtotalCents / 100).toFixed(2)
+                        : ''
+                    const dollars = window.prompt('New subtotal (CAD)', current)
+                    if (dollars == null) return false
+                    const subtotalCents = Math.round(Number(dollars) * 100)
+                    if (!Number.isFinite(subtotalCents) || subtotalCents < 0) {
+                      setToast('Enter a valid subtotal')
+                      return false
+                    }
+                    const reason = window.prompt('Reason for fare adjustment')
+                    if (reason == null || !reason.trim()) {
+                      setToast('Reason is required')
+                      return false
+                    }
+                    const ok = await adjustBookingFare(bookingId, {
+                      subtotalCents,
+                      reason: reason.trim(),
+                    })
+                    if (!ok) {
+                      setToast('Could not adjust fare')
+                      return false
+                    }
+                    setToast('Fare adjusted')
+                    return true
+                  })
+                }
+              >
+                {busy === 'adjust' ? 'Adjusting…' : 'Adjust fare'}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
 
       <section className="grid gap-2 sm:grid-cols-2">

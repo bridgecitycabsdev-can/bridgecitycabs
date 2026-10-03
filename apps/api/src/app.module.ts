@@ -27,6 +27,9 @@ import { JobsModule } from './jobs/jobs.module.js';
 import { IdempotencyModule } from './idempotency/idempotency.module.js';
 import { FaresModule } from './fares/fares.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
+import { FinanceModule } from './finance/finance.module.js';
+import { LedgerModule } from './ledger/ledger.module.js';
+import { PaymentsModule } from './payments/payments.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
 import { PlacesModule } from './places/places.module.js';
 import { PushModule } from './push/push.module.js';
@@ -68,6 +71,9 @@ const devBoardEnabled =
     DispatchConfigModule,
     BookingsModule,
     FaresModule,
+    LedgerModule,
+    FinanceModule,
+    PaymentsModule,
     DevicesModule,
     PushModule,
     RealtimeModule,

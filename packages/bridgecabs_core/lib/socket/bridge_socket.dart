@@ -21,6 +21,7 @@ class BridgeSocket {
     JsonHandler? onOfferCancelled,
     JsonHandler? onBookingUpdated,
     JsonHandler? onDriverLocation,
+    void Function()? onConnected,
   }) {
     disconnect();
     final socket = io.io(
@@ -29,6 +30,7 @@ class BridgeSocket {
         'token': token,
       }).build(),
     );
+    socket.onConnect((_) => onConnected?.call());
     socket.on('driver:state', (data) {
       final snapshot = _asMap(data);
       if (snapshot != null) onDriverState?.call(snapshot);
@@ -66,6 +68,8 @@ class BridgeSocket {
     socket.emit(event, payload);
     return true;
   }
+
+  bool get isConnected => _socket?.connected == true;
 
   void disconnect() {
     _socket?.dispose();

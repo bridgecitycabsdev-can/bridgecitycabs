@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bridgecabs_core/bridgecabs_core.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,10 +15,16 @@ final bridgeSocketProvider = Provider<BridgeSocket>((ref) {
 final locationPublisherProvider = ChangeNotifierProvider<LocationPublisher>((
   ref,
 ) {
-  final publisher = LocationPublisher(ref.watch(bridgeSocketProvider));
+  final publisher = LocationPublisher(
+    ref.watch(bridgeSocketProvider),
+    ref.watch(apiClientProvider).dio,
+  );
   ref.onDispose(publisher.stop);
   return publisher;
 });
+
+bool _bookingActive(DriverSnapshot snapshot) =>
+    snapshot.booking != null || snapshot.offer != null;
 
 /// Keeps the driver socket alive for the signed-in session, not only on /home.
 final driverRealtimeProvider = Provider<void>((ref) {
@@ -32,20 +40,24 @@ final driverRealtimeProvider = Provider<void>((ref) {
       final config = ref.read(appConfigProvider);
       final api = ref.read(apiClientProvider);
       final driver = ref.read(driverStateProvider.notifier);
+      final location = ref.read(locationPublisherProvider);
       ref.read(bridgeSocketProvider).connect(
         url: config.socketUrl('/driver'),
         token: token,
         refresh: api.refreshAccessToken,
+        onConnected: () {
+          unawaited(location.flushBuffer());
+        },
         onDriverState: (data) {
           final snapshot = DriverSnapshot.tryParse(data);
           if (snapshot == null) return;
           driver.applySocket(snapshot);
-          final location = ref.read(locationPublisherProvider);
-          if (snapshot.onShift) {
-            location.start();
-          } else {
-            location.stop();
-          }
+          unawaited(
+            location.sync(
+              onShift: snapshot.onShift,
+              bookingActive: _bookingActive(snapshot),
+            ),
+          );
         },
         onOfferNew: (data) {
           final offer = Offer.tryParse(data);
@@ -53,6 +65,15 @@ final driverRealtimeProvider = Provider<void>((ref) {
           HapticFeedback.heavyImpact();
           SystemSound.play(SystemSoundType.alert);
           driver.noteOfferNew(offer);
+          final current = driver.latest;
+          if (current != null) {
+            unawaited(
+              location.sync(
+                onShift: current.onShift,
+                bookingActive: true,
+              ),
+            );
+          }
         },
         onOfferExpired: (data) {
           final offerId = data['offerId'];

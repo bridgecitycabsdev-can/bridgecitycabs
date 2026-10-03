@@ -31,6 +31,13 @@ export function presenceOnBookingStatus(status: BookingStatus): DriverPresenceSt
   return PRESENCE_ON_STATUS[status] ?? null;
 }
 
+/** Statuses that refresh pendingPayment without changing presence. */
+export const PAYMENT_SNAPSHOT_STATUSES = new Set<BookingStatus>([
+  'PAYMENT_PENDING',
+  'PAYMENT_COMPLETED',
+  'CLOSED',
+]);
+
 const RELEASE_STATUSES = new Set<BookingStatus>([
   'SEARCHING_DRIVER',
   'CANCELLED',

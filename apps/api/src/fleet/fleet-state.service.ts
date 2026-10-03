@@ -44,9 +44,11 @@ import {
   driverIdReleasedBy,
   driverOfferSnapshot,
   passengerFirstName,
+  PAYMENT_SNAPSHOT_STATUSES,
   presenceFromBooking,
   presenceOnBookingStatus,
 } from './fleet-presence.js';
+import { evaluateLocationBatch } from '../realtime/location-guard.js';
 import { LocationConsentService } from './location-consent.service.js';
 import { shouldSampleLocation } from './location-sample.js';
 
@@ -338,6 +340,56 @@ export class FleetStateService {
       nowMs: point.receivedAtMs,
     });
     if (!applied) return null;
+    await this.bufferHistorySample(driverId, point);
+    const branchId = await this.redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.branchId);
+    return branchId;
+  }
+
+  /**
+   * Offline retry: up to 20 ordered points. Newest valid updates Redis presence;
+   * accepted points are sampled into the history buffer under Day 5 rules.
+   */
+  async recordLocationBatch(
+    user: AuthUser,
+    points: Array<{ lat: number; lng: number; accuracy: number; recordedAt: string }>,
+  ) {
+    const driver = await this.driverForUser(user.userId);
+    const nowMs = Date.now();
+    const accepted = evaluateLocationBatch({ points, nowMs });
+    if (!accepted.length) {
+      return { accepted: 0, applied: false };
+    }
+    const newest = accepted[accepted.length - 1]!;
+    const applied = await this.updateLocation(driver.id, {
+      lng: newest.lng,
+      lat: newest.lat,
+      accuracyM: newest.accuracyM,
+      nowMs: newest.atMs,
+    });
+    for (const point of accepted) {
+      await this.bufferHistorySample(driver.id, {
+        lng: point.lng,
+        lat: point.lat,
+        accuracyM: point.accuracyM,
+        recordedAt: point.recordedAt,
+        receivedAtMs: point.atMs,
+      });
+    }
+    return { accepted: accepted.length, applied: Boolean(applied) };
+  }
+
+  private async bufferHistorySample(
+    driverId: string,
+    point: {
+      lng: number;
+      lat: number;
+      heading?: number;
+      speedMps?: number;
+      accuracyM?: number;
+      recordedAt: string;
+      receivedAtMs: number;
+    },
+  ) {
     const key = driverKey(driverId);
     const [branchId, bookingId, status, histAt] = await this.redis.hmget(
       key,
@@ -346,7 +398,7 @@ export class FleetStateService {
       DRIVER_HASH_FIELDS.status,
       DRIVER_HASH_FIELDS.histAt,
     );
-    if (!branchId) return null;
+    if (!branchId) return;
     const lastSample = histAt ? Number(histAt) : null;
     if (
       !shouldSampleLocation(
@@ -355,7 +407,7 @@ export class FleetStateService {
         point.receivedAtMs,
       )
     ) {
-      return branchId;
+      return;
     }
     const buffered = this.redis.multi();
     buffered.rpush(
@@ -373,7 +425,6 @@ export class FleetStateService {
     );
     buffered.hset(key, DRIVER_HASH_FIELDS.histAt, String(point.receivedAtMs));
     await this.exec(buffered);
-    return branchId;
   }
 
   /** Ends an open shift after the presence key has been stale past the cutoff. */
@@ -407,7 +458,17 @@ export class FleetStateService {
     });
     if (!booking) return null;
     const presence = presenceOnBookingStatus(event.to);
-    if (!presence) return { branchId: booking.branchId, driver: null };
+    if (!presence) {
+      // Payment lifecycle does not move presence, but pendingPayment must refresh.
+      if (PAYMENT_SNAPSHOT_STATUSES.has(event.to)) {
+        const driverId =
+          event.driverId !== undefined ? event.driverId : booking.driverId;
+        if (!driverId) return { branchId: booking.branchId, driver: null };
+        const refreshed = await this.republishSnapshot(driverId);
+        return { branchId: booking.branchId, driver: refreshed };
+      }
+      return { branchId: booking.branchId, driver: null };
+    }
 
     const releasing =
       event.to === 'SEARCHING_DRIVER' ||
@@ -739,7 +800,7 @@ export class FleetStateService {
   }
 
   private async snapshot(driverId: string) {
-    const [driver, shift, booking, hash] = await Promise.all([
+    const [driver, shift, booking, pendingPaymentRow, hash] = await Promise.all([
       this.prisma.driver.findUnique({
         where: { id: driverId },
         select: { presenceVersion: true },
@@ -773,6 +834,22 @@ export class FleetStateService {
               lng: true,
             },
           },
+        },
+      }),
+      // Oldest unpaid cash trip. Uses Booking [driverId, status] index.
+      this.prisma.booking.findFirst({
+        where: {
+          driverId,
+          status: 'PAYMENT_PENDING',
+          paymentMethod: 'CASH',
+        },
+        orderBy: { completedAt: 'asc' },
+        select: {
+          id: true,
+          trackingId: true,
+          finalFareCents: true,
+          finalSubtotalCents: true,
+          finalTaxCents: true,
         },
       }),
       this.redis.hgetall(driverKey(driverId)),
@@ -846,6 +923,20 @@ export class FleetStateService {
               },
               serverNow,
             )
+          : null,
+      pendingPayment:
+        pendingPaymentRow &&
+        pendingPaymentRow.finalFareCents != null &&
+        pendingPaymentRow.finalSubtotalCents != null &&
+        pendingPaymentRow.finalTaxCents != null
+          ? {
+              bookingId: pendingPaymentRow.id,
+              trackingId: pendingPaymentRow.trackingId,
+              totalCents: pendingPaymentRow.finalFareCents,
+              subtotalCents: pendingPaymentRow.finalSubtotalCents,
+              taxCents: pendingPaymentRow.finalTaxCents,
+              method: 'CASH' as const,
+            }
           : null,
     });
   }

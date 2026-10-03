@@ -31,6 +31,7 @@ void main() {
       'status': 'OFFERED',
       'shift': null,
       'booking': null,
+      'pendingPayment': null,
       'offer': {
         'id': '11111111-1111-4111-8111-111111111111',
         'expiresAt': '2026-10-03T18:00:15.000Z',
@@ -49,5 +50,26 @@ void main() {
     });
     expect(first?.status, DriverStatus.offered);
     expect(first?.offer?.paymentMethod, 'CARD');
+    expect(first?.pendingPayment, isNull);
+  });
+
+  test('parses pendingPayment for the collect-cash screen', () {
+    final snapshot = DriverSnapshot.tryParse({
+      'v': 4,
+      'status': 'AVAILABLE',
+      'shift': null,
+      'booking': null,
+      'offer': null,
+      'pendingPayment': {
+        'bookingId': '22222222-2222-4222-8222-222222222222',
+        'trackingId': 'BC-CASH01',
+        'totalCents': 2100,
+        'subtotalCents': 2000,
+        'taxCents': 100,
+        'method': 'CASH',
+      },
+    });
+    expect(snapshot?.pendingPayment?.totalCents, 2100);
+    expect(snapshot?.pendingPayment?.method, 'CASH');
   });
 }

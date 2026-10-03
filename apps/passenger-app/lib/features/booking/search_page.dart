@@ -99,7 +99,13 @@ class _SearchPageState extends ConsumerState<SearchPage> {
         title: const Text('Where to?'),
         actions: [
           TextButton(
-            onPressed: () => ref.read(sessionProvider.notifier).signOut(),
+            onPressed: () => ref
+                .read(sessionProvider.notifier)
+                .signOutWithPushCleanup(
+                  () => ref
+                      .read(pushControllerProvider.notifier)
+                      .unregisterAndDeleteToken(),
+                ),
             child: const Text('Sign out'),
           ),
         ],

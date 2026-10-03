@@ -42,10 +42,17 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>BridgeCabs shares your location with dispatch while you are on shift and the app is open.</string>
+	<string>Bridge City Cabs shares your location with dispatch and the passenger while you are on shift, including when the app is in the background.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>remote-notification</string>
+	</array>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
+	<true/>
+	<key>FirebaseAppDelegateProxyEnabled</key>
 	<true/>
 </dict>
 </plist>

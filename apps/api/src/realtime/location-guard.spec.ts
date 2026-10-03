@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  evaluateLocationBatch,
   evaluateLocationPing,
   freshBucket,
   haversineMeters,
@@ -93,4 +94,38 @@ describe('location guard', () => {
       '2026-09-30T15:00:00.000Z',
     );
   });
+
+  it('accepts an ordered offline batch under the same accuracy and speed rules', () => {
+    const accepted = evaluateLocationBatch({
+      nowMs: now,
+      points: [
+        {
+          ...lethbridge,
+          accuracy: 8,
+          recordedAt: '2026-09-30T14:59:50.000Z',
+        },
+        {
+          lat: 49.69395,
+          lng: -112.8418,
+          accuracy: 8,
+          recordedAt: '2026-09-30T14:59:51.000Z',
+        },
+        {
+          ...calgary,
+          accuracy: 8,
+          recordedAt: '2026-09-30T14:59:52.000Z',
+        },
+        {
+          lat: 49.6941,
+          lng: -112.8418,
+          accuracy: 120,
+          recordedAt: '2026-09-30T14:59:53.000Z',
+        },
+      ],
+    });
+    expect(accepted).toHaveLength(2);
+    expect(accepted[0]?.lat).toBe(lethbridge.lat);
+    expect(accepted[1]?.lat).toBeCloseTo(49.69395);
+  });
 });
+

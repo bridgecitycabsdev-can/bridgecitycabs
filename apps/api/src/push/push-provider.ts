@@ -11,10 +11,16 @@ export type PushMessage = {
   highPriority: boolean;
   /** iOS time-sensitive alert. Silent data-only pushes are unreliable there. */
   timeSensitive: boolean;
+  /** Android channel for the system notification (offers use `offers`). */
+  androidChannelId?: string;
+  /** Collapse / replace prior notifications for the same offer. */
+  collapseKey?: string;
+  /** Drop the message if undelivered by this Unix second (APNs) / ms TTL (Android). */
+  expiresAtMs?: number;
 };
 
 export interface PushProvider {
-  /** Returns tokens FCM reported as invalid. */
+  /** Returns tokens FCM reported as unregistered or invalid. */
   send(targets: PushTarget[], message: PushMessage): Promise<string[]>;
 }
 

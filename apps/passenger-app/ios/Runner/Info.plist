@@ -47,7 +47,13 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>BridgeCabs uses your location to set your pickup and show your trip.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>GMSApiKey</key>
 	<string>$(MAPS_API_KEY)</string>
+	<key>FirebaseAppDelegateProxyEnabled</key>
+	<true/>
 </dict>
 </plist>

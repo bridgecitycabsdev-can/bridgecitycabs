@@ -56,14 +56,19 @@ void main() {
     expect(booking.pickupAddress, 'City Hall');
   });
 
-  test('treats completed trips as terminal', () {
+  test('treats completed trips as terminal receipt', () {
     final booking = ActiveBooking.tryParse({
       ...payload,
-      'status': 'TRIP_COMPLETED',
+      'status': 'PAYMENT_PENDING',
       'driver': null,
+      'finalSubtotalCents': 2500,
+      'finalTaxCents': 125,
+      'finalFareCents': 2625,
     });
     expect(booking!.isTerminal, isTrue);
     expect(booking.isLive, isFalse);
+    expect(booking.isReceipt, isTrue);
+    expect(booking.receiptTotalCents, 2625);
   });
 
   test('classifies searching and no-driver states', () {

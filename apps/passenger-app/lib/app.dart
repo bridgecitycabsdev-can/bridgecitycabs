@@ -5,9 +5,11 @@ import 'package:go_router/go_router.dart';
 
 import 'features/booking/confirm_page.dart';
 import 'features/booking/options_page.dart';
+import 'features/booking/receipt_page.dart';
 import 'features/booking/search_page.dart';
 import 'features/booking/searching_page.dart';
 import 'features/tracking/tracking_page.dart';
+import 'push.dart';
 import 'realtime.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -31,6 +33,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         '/confirm',
         '/searching',
         '/tracking',
+        '/receipt',
       };
       if (!signedIn && bookingRoutes.contains(location)) return '/phone';
       if (!signedIn && location == '/boot') return '/phone';
@@ -46,7 +49,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         final target = active.isTracking ? '/tracking' : '/searching';
         return location == target ? null : target;
       }
-      if (location == '/searching' || location == '/tracking') {
+      if (active != null && active.isReceipt) {
+        return location == '/receipt' ? null : '/receipt';
+      }
+      if (location == '/searching' ||
+          location == '/tracking' ||
+          location == '/receipt') {
         return '/home';
       }
       return null;
@@ -83,6 +91,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/tracking',
         builder: (context, state) => const TrackingPage(),
       ),
+      GoRoute(
+        path: '/receipt',
+        builder: (context, state) => const ReceiptPage(),
+      ),
     ],
   );
 });
@@ -93,6 +105,7 @@ class PassengerApp extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(passengerRealtimeProvider);
+    ref.watch(passengerPushProvider);
     return MaterialApp.router(
       title: 'BridgeCabs',
       theme: bridgeTheme(Brightness.light),

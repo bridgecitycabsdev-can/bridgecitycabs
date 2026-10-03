@@ -6,6 +6,7 @@ import { BookingLists } from '@/features/bookings/booking-lists'
 import { BranchClock } from '@/features/bookings/BranchClock'
 import { ClosedJobsModal } from '@/features/bookings/ClosedJobsModal'
 import { JobDetailsModal } from '@/features/bookings/JobDetailsModal'
+import { PaymentPendingJobsModal } from '@/features/bookings/PaymentPendingJobsModal'
 import { useBookingUi } from '@/features/bookings/selection'
 import { TimeoutJobsModal } from '@/features/bookings/TimeoutJobsModal'
 import { NewJobPanel } from '@/features/dispatch/drafts/NewJobPanel'
@@ -110,6 +111,7 @@ function ConsoleLayout() {
       </div>
       <JobDetailsModal />
       <TimeoutJobsModal />
+      <PaymentPendingJobsModal />
       <ClosedJobsModal />
       {toast ? (
         <div

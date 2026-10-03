@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useOpsPanels } from '@/features/bookings/ops-panels'
 import { useBookingUi } from '@/features/bookings/selection'
 import { useTimeoutAlerts } from '@/features/bookings/timeout-alerts'
+import { dispatchConfigSchema } from '@/features/dispatch/drafts/schema'
 import { useDrafts } from '@/features/dispatch/drafts/store'
 import { api, jsonBody } from '@/lib/api'
 
@@ -57,10 +58,27 @@ export function BookingLists() {
   const openSearch = useBookingUi((state) => state.openSearch)
   const openTimeout = useOpsPanels((state) => state.openTimeout)
   const openClosed = useOpsPanels((state) => state.openClosed)
+  const openPaymentPending = useOpsPanels((state) => state.openPaymentPending)
   const badge = useTimeoutAlerts((state) => state.badge)
   const soundEnabled = useTimeoutAlerts((state) => state.soundEnabled)
   const setSoundEnabled = useTimeoutAlerts((state) => state.setSoundEnabled)
   const primeAudio = useTimeoutAlerts((state) => state.primeAudio)
+  const role = useSession((state) => state.profile?.role.name)
+  const selectedBranchId = useSession((state) => state.branchId)
+  const ownBranchId = useSession((state) => state.profile?.branch?.id)
+  const branchId = role === 'super_admin' ? selectedBranchId : ownBranchId
+  const config = useQuery({
+    queryKey: ['dispatch-config', branchId ?? null],
+    enabled: Boolean(branchId),
+    queryFn: async () => {
+      const result = await api.GET('/api/v1/config/dispatch', {
+        params: { query: { branchId: branchId! } },
+      })
+      if (!result.response.ok) throw new Error('Could not load dispatch rules')
+      return dispatchConfigSchema.parse(await jsonBody(result))
+    },
+  })
+  const paymentBadge = config.data?.paymentPendingAlertCount ?? 0
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -88,6 +106,14 @@ export function BookingLists() {
             {badge > 0 ? (
               <span className="bg-destructive text-destructive-foreground ml-1 inline-flex min-w-4 justify-center rounded-full px-1 text-[10px] leading-4">
                 {badge > 99 ? '99+' : badge}
+              </span>
+            ) : null}
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={openPaymentPending}>
+            Payment Pending
+            {paymentBadge > 0 ? (
+              <span className="bg-destructive text-destructive-foreground ml-1 inline-flex min-w-4 justify-center rounded-full px-1 text-[10px] leading-4">
+                {paymentBadge > 99 ? '99+' : paymentBadge}
               </span>
             ) : null}
           </Button>

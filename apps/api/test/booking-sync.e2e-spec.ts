@@ -286,10 +286,21 @@ describe('booking fleet sync (e2e)', () => {
       .set('Authorization', `Bearer ${driverToken}`)
       .expect(200);
     const versionOnTrip = await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.version);
-    await request(app.getHttpServer())
+    const completed = await request(app.getHttpServer())
       .post(`/api/v1/driver/bookings/${bookingId}/complete`)
       .set('Authorization', `Bearer ${driverToken}`)
       .expect(200);
+    expect(completed.body).toMatchObject({
+      id: bookingId,
+      status: 'PAYMENT_PENDING',
+      paymentMethod: 'CASH',
+      finalSubtotalCents: 2500,
+      finalTaxCents: 125,
+      finalFareCents: 2625,
+      commissionBps: 0,
+      commissionCents: 0,
+      driverEarningCents: 2500,
+    });
 
     expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.status)).toBe('AVAILABLE');
     expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.bookingId)).toBeNull();
@@ -309,21 +320,22 @@ describe('booking fleet sync (e2e)', () => {
         'AVAILABLE',
       ]),
     );
-    await waitFor(() => bookingEvents.length >= 5);
-    expect(bookingEvents.slice(0, 5)).toEqual([
+    await waitFor(() => bookingEvents.length >= 6);
+    expect(bookingEvents.slice(0, 6)).toEqual([
       'DRIVER_ASSIGNED',
       'DRIVER_ARRIVING',
       'DRIVER_ARRIVED',
       'TRIP_STARTED',
       'TRIP_COMPLETED',
+      'PAYMENT_PENDING',
     ]);
     const pushed = statuses.at(-1);
     expect(pushed).toBe('AVAILABLE');
     await waitFor(() => mapStatuses.includes('AVAILABLE'), 8000);
 
+    // PAYMENT_PENDING must not move fleet again after TRIP_COMPLETED freed the driver.
     const beforePayment = await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.version);
     const stateCount = statuses.length;
-    await bookings.transition(bookingId, 'PAYMENT_PENDING', { type: 'SYSTEM' });
     await delay(100);
     expect(statuses).toHaveLength(stateCount);
     expect(await redis.hget(driverKey(driverId), DRIVER_HASH_FIELDS.status)).toBe('AVAILABLE');

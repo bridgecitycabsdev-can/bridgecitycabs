@@ -120,6 +120,9 @@ export const driverStateSchema = z
         distanceToPickupM: z.number().int().nonnegative(),
         tripDistanceM: z.number().int().nonnegative(),
         quotedFareCents: z.number().int(),
+        paymentMethod: z.enum(['CASH', 'CARD', 'WALLET', 'ACCOUNT']),
+        vanOnly: z.boolean(),
+        ladyDriverOnly: z.boolean(),
         passengerFirstName: z.string(),
         notes: z.string().nullable(),
       })
@@ -208,6 +211,9 @@ export const offerNewSchema = z
     distanceToPickupM: z.number().int().nonnegative(),
     tripDistanceM: z.number().int().nonnegative(),
     quotedFareCents: z.number().int(),
+    paymentMethod: z.enum(['CASH', 'CARD', 'WALLET', 'ACCOUNT']),
+    vanOnly: z.boolean(),
+    ladyDriverOnly: z.boolean(),
     passengerFirstName: z.string(),
     notes: z.string().nullable(),
   })
@@ -356,6 +362,13 @@ export const bookingCreatedSchema = z
   })
   .strict();
 
+export const bookingEditedSchema = z
+  .object({
+    id: z.uuid(),
+    branchId: z.uuid(),
+  })
+  .strict();
+
 export const SOCKET_EVENTS = {
   driverLocation: 'driver:location',
   driverHeartbeat: 'driver:heartbeat',
@@ -368,6 +381,7 @@ export const SOCKET_EVENTS = {
   fleetDriverUpdated: 'fleet:driver_updated',
   bookingStatusChanged: 'booking:status_changed',
   bookingCreated: 'booking:created',
+  bookingEdited: 'booking:edited',
   offerNew: 'offer:new',
   offerCancelled: 'offer:cancelled',
   offerExpired: 'offer:expired',
@@ -391,6 +405,7 @@ export type FleetDriver = z.infer<typeof fleetDriverSchema>;
 export type FleetSnapshot = z.infer<typeof fleetSnapshotSchema>;
 export type BookingStatusChanged = z.infer<typeof bookingStatusChangedSchema>;
 export type BookingCreated = z.infer<typeof bookingCreatedSchema>;
+export type BookingEdited = z.infer<typeof bookingEditedSchema>;
 export type OfferNew = z.infer<typeof offerNewSchema>;
 export type OfferEnded = z.infer<typeof offerEndedSchema>;
 export type OfferReceived = z.infer<typeof offerReceivedSchema>;
@@ -425,6 +440,7 @@ export const socketPayloads = {
   [SOCKET_EVENTS.fleetDriverUpdated]: fleetDriverUpdatedSchema,
   [SOCKET_EVENTS.bookingStatusChanged]: bookingStatusChangedSchema,
   [SOCKET_EVENTS.bookingCreated]: bookingCreatedSchema,
+  [SOCKET_EVENTS.bookingEdited]: bookingEditedSchema,
   [SOCKET_EVENTS.offerNew]: offerNewSchema,
   [SOCKET_EVENTS.offerCancelled]: offerEndedSchema,
   [SOCKET_EVENTS.offerExpired]: offerEndedSchema,

@@ -20,7 +20,12 @@ describe('calcFare', () => {
 
   it('applies the minimum before tax', () => {
     const fare = calcFare(
-      { baseFareCents: 100, perKmCents: 0, perMinuteCents: 0, minFareCents: 500 },
+      {
+        baseFareCents: 100,
+        perKmCents: 0,
+        perMinuteCents: 0,
+        minFareCents: 500,
+      },
       0,
       0,
       500,
@@ -80,7 +85,12 @@ describe('calcFare', () => {
 
     expect(
       calcFare(
-        { baseFareCents: 10, perKmCents: 0, perMinuteCents: 0, minFareCents: 0 },
+        {
+          baseFareCents: 10,
+          perKmCents: 0,
+          perMinuteCents: 0,
+          minFareCents: 0,
+        },
         0,
         0,
         500,

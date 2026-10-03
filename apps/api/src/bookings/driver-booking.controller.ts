@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   HttpCode,
   HttpStatus,
@@ -13,6 +14,8 @@ import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { BookingStateService } from './booking-state.service.js';
+import { BookingsService } from './bookings.service.js';
+import { ReleaseBookingDto } from './dto/release-booking.dto.js';
 
 @Controller('driver/bookings')
 @Roles('driver')
@@ -20,6 +23,7 @@ export class DriverBookingController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly state: BookingStateService,
+    private readonly bookings: BookingsService,
   ) {}
 
   @Post(':id/arriving')
@@ -44,6 +48,16 @@ export class DriverBookingController {
   @HttpCode(HttpStatus.OK)
   complete(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.move(user, id, 'TRIP_COMPLETED');
+  }
+
+  @Post(':id/release')
+  @HttpCode(HttpStatus.OK)
+  release(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: ReleaseBookingDto,
+  ) {
+    return this.bookings.release(user, id, dto);
   }
 
   private async move(user: AuthUser, bookingId: string, to: BookingStatus) {

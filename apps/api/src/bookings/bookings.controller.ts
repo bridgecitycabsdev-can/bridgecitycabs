@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
 } from '@nestjs/common';
@@ -23,6 +24,7 @@ import { CancelBookingDto } from './dto/cancel-booking.dto.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
 import { LookupBookingQuery } from './dto/lookup-booking.dto.js';
 import { UnassignBookingDto } from './dto/unassign-booking.dto.js';
+import { UpdateBookingDto } from './dto/update-booking.dto.js';
 
 @Controller('bookings')
 @Roles(...STAFF_ROLES)
@@ -52,6 +54,25 @@ export class BookingsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.bookings.findOne(id, user);
+  }
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpdateBookingDto,
+  ) {
+    return this.bookings.update(id, dto, user);
+  }
+
+  @Post(':id/retry-search')
+  @HttpCode(HttpStatus.OK)
+  @Roles('dispatcher', 'customer_care', 'branch_admin', 'super_admin')
+  retrySearch(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.bookings.retrySearch(id, user);
   }
 
   @Post(':id/dispatch-mode')

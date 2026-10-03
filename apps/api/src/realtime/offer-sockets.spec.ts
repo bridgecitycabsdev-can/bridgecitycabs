@@ -70,6 +70,9 @@ describe('OfferSocketListener', () => {
           booking: {
             distanceMeters: 8000,
             quotedFareCents: 2500,
+            paymentMethod: 'CASH',
+            vanOnly: false,
+            ladyDriverOnly: false,
             notes: null,
             passengerName: 'Leila Kaur',
             passenger: { firstName: 'Leila' },

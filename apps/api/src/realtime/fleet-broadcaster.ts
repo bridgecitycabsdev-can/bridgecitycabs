@@ -2,10 +2,12 @@ import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import {
   SOCKET_EVENTS,
   bookingCreatedSchema,
+  bookingEditedSchema,
   bookingStatusChangedSchema,
   offerCreatedSchema,
   offerResolvedSchema,
   type BookingCreated,
+  type BookingEdited,
   type BookingStatusChanged,
   type FleetDriver,
   type OfferCreated,
@@ -35,6 +37,12 @@ export class FleetBroadcaster implements OnModuleDestroy {
     const body = bookingCreatedSchema.parse(payload);
     assertBroadcastSafe(body);
     this.server?.to(branchRoom(branchId)).emit(SOCKET_EVENTS.bookingCreated, body);
+  }
+
+  emitEdited(branchId: string, payload: BookingEdited) {
+    const body = bookingEditedSchema.parse(payload);
+    assertBroadcastSafe(body);
+    this.server?.to(branchRoom(branchId)).emit(SOCKET_EVENTS.bookingEdited, body);
   }
 
   emitBooking(branchId: string, payload: BookingStatusChanged) {

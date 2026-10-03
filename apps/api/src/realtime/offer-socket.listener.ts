@@ -47,6 +47,9 @@ export class OfferSocketListener {
             select: {
               distanceMeters: true,
               quotedFareCents: true,
+              paymentMethod: true,
+              vanOnly: true,
+              ladyDriverOnly: true,
               notes: true,
               passengerName: true,
               passenger: { select: { firstName: true } },
@@ -97,6 +100,9 @@ export class OfferSocketListener {
           distanceToPickupM: card.distanceToPickupM,
           tripDistanceM: card.tripDistanceM,
           quotedFareCents: card.quotedFareCents,
+          paymentMethod: card.paymentMethod,
+          vanOnly: card.vanOnly,
+          ladyDriverOnly: card.ladyDriverOnly,
           passengerFirstName: card.passengerFirstName,
           notes: card.notes,
         } satisfies OfferNew);

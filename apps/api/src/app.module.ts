@@ -1,6 +1,6 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { REDIS } from './redis/redis.constants.js';
@@ -10,6 +10,7 @@ import type { Redis } from 'ioredis';
 import { AuthModule } from './auth/auth.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { JwtAuthGuard } from './common/jwt-auth.guard.js';
 import { RejectTokenQueryMiddleware } from './common/reject-token-query.middleware.js';
 import { RolesGuard } from './common/roles.guard.js';
@@ -27,10 +28,12 @@ import { IdempotencyModule } from './idempotency/idempotency.module.js';
 import { FaresModule } from './fares/fares.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
+import { PlacesModule } from './places/places.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { DevBoardModule } from './dev/dev-board.module.js';
+import { DispatchConfigModule } from './config/dispatch-config.module.js';
 
 const devBoardEnabled =
   process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
@@ -61,6 +64,8 @@ const devBoardEnabled =
     DocumentsModule,
     DispatchModule,
     PassengersModule,
+    PlacesModule,
+    DispatchConfigModule,
     BookingsModule,
     FaresModule,
     DevicesModule,
@@ -71,6 +76,7 @@ const devBoardEnabled =
   controllers: [AppController],
   providers: [
     AppService,
+    { provide: APP_FILTER, useClass: ApiExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

@@ -10,6 +10,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { CreateBookingStopDto } from '../../bookings/dto/create-booking.dto.js';
@@ -24,6 +25,11 @@ export class PassengerCreateBookingDto {
 
   @IsEnum(FareZone)
   zone: FareZone;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(4000)
+  quoteToken!: string;
 
   @IsOptional()
   @IsBoolean()

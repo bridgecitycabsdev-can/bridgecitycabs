@@ -18,6 +18,10 @@ model Branch {
   autoDispatchDefault Boolean   @default(false)
   offerTimeoutSeconds Int       @default(15)
   searchWindowSeconds Int       @default(120)
+  centerLat           Float?
+  centerLng           Float?
+  // Placeholder until dispatch confirms how inside town is defined.
+  townRadiusKm        Int       @default(15)
   createdAt           DateTime  @default(now())
   users      User[]
   vehicles   Vehicle[]
@@ -37,6 +41,7 @@ model User {
   id            String         @id @default(uuid())
   email         String?        @unique
   phone         String?        @unique
+  displayName   String?
   passwordHash  String?
   branchId      String?
   branch        Branch?        @relation(fields: [branchId], references: [id])
@@ -49,6 +54,22 @@ model User {
   deviceTokens  DeviceToken[]
   driver        Driver?
   passenger     Passenger?
+}
+
+/// Append-only. Rows can contain phone numbers and other personal information.
+/// Agree a retention period with counsel before production.
+model AuditLog {
+  id          String    @id @default(uuid())
+  actorUserId String?
+  actorType   ActorType
+  entity      String
+  entityId    String
+  action      String
+  before      Json?
+  after       Json?
+  createdAt   DateTime  @default(now())
+
+  @@index([entity, entityId, createdAt])
 }
 
 enum DriverStatus {

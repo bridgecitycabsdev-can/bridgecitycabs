@@ -2,12 +2,20 @@ import { Injectable } from '@nestjs/common';
 
 export type GeoPoint = { lat: number; lng: number };
 
+export type DistanceSource = 'ROUTES' | 'ESTIMATE';
+
+export type TripMeasure = {
+  meters: number;
+  seconds: number;
+  source?: DistanceSource;
+};
+
 export interface DistanceService {
   estimate(
     from: GeoPoint,
     to: GeoPoint,
     via?: GeoPoint[],
-  ): Promise<{ meters: number; seconds: number }>;
+  ): Promise<TripMeasure>;
 }
 
 export const DISTANCE_SERVICE = Symbol('DistanceService');
@@ -30,7 +38,7 @@ export class HaversineDistanceService implements DistanceService {
   }
 }
 
-function haversineMeters(a: GeoPoint, b: GeoPoint) {
+export function haversineMeters(a: GeoPoint, b: GeoPoint) {
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
   const lat1 = toRad(a.lat);

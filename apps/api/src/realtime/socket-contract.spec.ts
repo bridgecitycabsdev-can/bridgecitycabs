@@ -18,6 +18,7 @@ describe('socket contract', () => {
       fleetDriverUpdated: 'fleet:driver_updated',
       bookingStatusChanged: 'booking:status_changed',
       bookingCreated: 'booking:created',
+      bookingEdited: 'booking:edited',
       offerNew: 'offer:new',
       offerCancelled: 'offer:cancelled',
       offerExpired: 'offer:expired',
@@ -116,11 +117,32 @@ describe('socket contract', () => {
         distanceToPickupM: 400,
         tripDistanceM: 8000,
         quotedFareCents: 2500,
+        paymentMethod: 'CASH',
+        vanOnly: false,
+        ladyDriverOnly: false,
         passengerFirstName: 'Leila',
         notes: null,
         passengerPhone: '+14035550100',
       }).success,
     ).toBe(false);
+    expect(
+      socketPayloads['offer:new'].parse({
+        offerId,
+        bookingId,
+        expiresAt: at,
+        serverNow: at,
+        pickup: { address: 'City Hall', lat: 49.69, lng: -112.84 },
+        dropoff: { address: 'Airport', lat: 49.63, lng: -112.8 },
+        distanceToPickupM: 400,
+        tripDistanceM: 8000,
+        quotedFareCents: 2500,
+        paymentMethod: 'CARD',
+        vanOnly: true,
+        ladyDriverOnly: false,
+        passengerFirstName: 'Leila',
+        notes: null,
+      }).paymentMethod,
+    ).toBe('CARD');
   });
 
   it('sends the passenger a booking card and their own driver point, without a phone number', () => {

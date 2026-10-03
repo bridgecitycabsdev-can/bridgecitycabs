@@ -2,7 +2,7 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import 'socket_auth.dart';
 
-typedef DriverStateHandler = void Function(Map<String, dynamic> snapshot);
+typedef JsonHandler = void Function(Map<String, dynamic> payload);
 
 /// The Dart socket client cannot pass a token callback, so an unauthenticated
 /// connect refreshes over REST, writes the new token into `socket.auth`, and
@@ -15,8 +15,12 @@ class BridgeSocket {
     required String url,
     required String token,
     required Future<String?> Function() refresh,
-    DriverStateHandler? onDriverState,
-    void Function(Map<String, dynamic> booking)? onBookingUpdated,
+    JsonHandler? onDriverState,
+    JsonHandler? onOfferNew,
+    JsonHandler? onOfferExpired,
+    JsonHandler? onOfferCancelled,
+    JsonHandler? onBookingUpdated,
+    JsonHandler? onDriverLocation,
   }) {
     disconnect();
     final socket = io.io(
@@ -29,9 +33,25 @@ class BridgeSocket {
       final snapshot = _asMap(data);
       if (snapshot != null) onDriverState?.call(snapshot);
     });
+    socket.on('offer:new', (data) {
+      final payload = _asMap(data);
+      if (payload != null) onOfferNew?.call(payload);
+    });
+    socket.on('offer:expired', (data) {
+      final payload = _asMap(data);
+      if (payload != null) onOfferExpired?.call(payload);
+    });
+    socket.on('offer:cancelled', (data) {
+      final payload = _asMap(data);
+      if (payload != null) onOfferCancelled?.call(payload);
+    });
     socket.on('booking:updated', (data) {
       final booking = _asMap(data);
       if (booking != null) onBookingUpdated?.call(booking);
+    });
+    socket.on('driver:location', (data) {
+      final payload = _asMap(data);
+      if (payload != null) onDriverLocation?.call(payload);
     });
     socket.on('connect_error', (error) {
       if (!isUnauthenticated(error)) return;

@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiException } from '../common/api-exception.js';
 
 const ids = vi.hoisted(() => ({
   newTrackingId: vi.fn(),
@@ -53,7 +54,12 @@ describe('BookingsService tracking id', () => {
     };
     const prisma = {
       passenger: { findFirst: vi.fn(async () => null) },
-      vehicleType: { findUnique: vi.fn(async () => ({ id: dto.vehicleTypeId, active: true })) },
+      vehicleType: {
+        findUnique: vi.fn(async () => ({
+          id: dto.vehicleTypeId,
+          active: true,
+        })),
+      },
       fareRule: {
         findUnique: vi.fn(async () => ({
           active: true,
@@ -66,7 +72,9 @@ describe('BookingsService tracking id', () => {
       branch: {
         findUnique: vi.fn(async () => ({ id: 'branch-1', gstRateBps: 500 })),
       },
-      $transaction: vi.fn(async (run: (client: typeof tx) => Promise<unknown>) => run(tx)),
+      $transaction: vi.fn(
+        async (run: (client: typeof tx) => Promise<unknown>) => run(tx),
+      ),
     };
     const state = {
       transition: vi.fn(async () => ({
@@ -76,17 +84,44 @@ describe('BookingsService tracking id', () => {
       })),
     };
     const events = { emit: vi.fn(), emitAsync: vi.fn(async () => []) };
+    const estimate = vi.fn(async () => ({ meters: 1300, seconds: 117 }));
+    const acceptQuote = vi.fn(
+      (): {
+        distanceM: number;
+        durationS: number;
+        subtotalCents: number;
+        taxCents: number;
+        totalCents: number;
+      } | null => null,
+    );
+    const quotes = vi.fn(async () => ({
+      distanceM: 8100,
+      durationS: 1020,
+      source: 'ROUTES',
+      zone: 'INSIDE_TOWN',
+      options: [],
+    }));
     const service = new BookingsService(
       prisma as never,
       state as never,
       { assertAvailableForAssign: vi.fn() } as never,
       { get: () => undefined } as never,
       events as never,
-      { estimate: async () => ({ meters: 1300, seconds: 117 }) } as never,
+      { estimate } as never,
+      { acceptQuote, quotes } as never,
       { cancel: async () => undefined } as never,
       { enqueueAttempt: async () => undefined } as never,
     );
-    return { service, tx, state, events };
+    return {
+      service,
+      tx,
+      state,
+      events,
+      prisma,
+      estimate,
+      acceptQuote,
+      quotes,
+    };
   }
 
   let ctx: ReturnType<typeof build>;
@@ -120,18 +155,78 @@ describe('BookingsService tracking id', () => {
     });
     expect(ctx.events.emitAsync).toHaveBeenCalledWith(
       'booking.status_changed',
-      expect.objectContaining({ bookingId: 'booking-1', to: 'SEARCHING_DRIVER' }),
+      expect.objectContaining({
+        bookingId: 'booking-1',
+        to: 'SEARCHING_DRIVER',
+      }),
     );
     expect(ids.newTrackingId).toHaveBeenCalledTimes(2);
     expect(ctx.tx.booking.create).toHaveBeenCalledTimes(2);
     expect(ctx.state.transition).toHaveBeenCalledTimes(1);
   });
 
+  it('recomputes a dispatch booking that has no quote token', async () => {
+    ids.newTrackingId.mockReturnValue('BC-UNIQUE01');
+    ctx.tx.booking.create.mockResolvedValue({ id: 'booking-1' });
+
+    await ctx.service.create(dto, user);
+
+    expect(ctx.estimate).toHaveBeenCalledOnce();
+    expect(ctx.acceptQuote).not.toHaveBeenCalled();
+  });
+
+  it('charges the signed quote and does not measure the route again', async () => {
+    ids.newTrackingId.mockReturnValue('BC-UNIQUE01');
+    ctx.tx.booking.create.mockResolvedValue({ id: 'booking-1' });
+    ctx.acceptQuote.mockReturnValue({
+      distanceM: 8100,
+      durationS: 1020,
+      subtotalCents: 2510,
+      taxCents: 126,
+      totalCents: 2636,
+    });
+
+    await ctx.service.create({ ...dto, quoteToken: 'signed' }, user);
+
+    expect(ctx.estimate).not.toHaveBeenCalled();
+    expect(ctx.prisma.fareRule.findUnique).not.toHaveBeenCalled();
+    expect(ctx.tx.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          distanceMeters: 8100,
+          durationSeconds: 1020,
+          quotedFareCents: 2510,
+          quotedTaxCents: 126,
+        }),
+      }),
+    );
+  });
+
+  it('returns a fresh quote when the token is expired or mismatched', async () => {
+    ctx.acceptQuote.mockReturnValue(null);
+
+    await expect(
+      ctx.service.create({ ...dto, quoteToken: 'expired' }, user),
+    ).rejects.toBeInstanceOf(ApiException);
+    await expect(
+      ctx.service.create({ ...dto, quoteToken: 'expired' }, user),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: {
+        code: 'QUOTE_EXPIRED',
+        quote: expect.objectContaining({ distanceM: 8100 }),
+      },
+    });
+    expect(ctx.tx.booking.create).not.toHaveBeenCalled();
+  });
+
   it('does not retry a unique conflict that is not the tracking id', async () => {
     ids.newTrackingId.mockReturnValue('BC-UNIQUE01');
     ctx.tx.booking.create.mockRejectedValueOnce(unique('phone'));
 
-    await expect(ctx.service.create(dto, user)).rejects.toMatchObject({ code: 'P2002' });
+    await expect(ctx.service.create(dto, user)).rejects.toMatchObject({
+      code: 'P2002',
+    });
     expect(ctx.tx.booking.create).toHaveBeenCalledTimes(1);
   });
 });

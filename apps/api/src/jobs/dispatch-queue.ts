@@ -8,6 +8,8 @@ export const DISPATCH_QUEUE = Symbol('DISPATCH_QUEUE');
 
 export interface DispatchQueue {
   enqueueAttempt(bookingId: string, n: number, delayMs?: number): Promise<void>;
+  /** Drop dispatch-attempt jobs still waiting for this booking. */
+  removeAttempts(bookingId: string): Promise<void>;
   scheduleRelease(bookingId: string, scheduledAt: Date): Promise<void>;
 }
 
@@ -35,6 +37,20 @@ export class BullDispatchQueue implements DispatchQueue {
     });
   }
 
+  async removeAttempts(bookingId: string) {
+    const jobs = await this.queue.getJobs(['waiting', 'delayed']);
+    for (const job of jobs) {
+      if (job.name !== JOB_NAMES.dispatchAttempt) continue;
+      const data = job.data as { bookingId?: string };
+      if (data.bookingId !== bookingId) continue;
+      try {
+        await job.remove();
+      } catch {
+        // A job that already started is left for the worker, which ignores a manual booking.
+      }
+    }
+  }
+
   scheduleRelease(bookingId: string, scheduledAt: Date) {
     const leadMs = leadMinutes(this.config) * 60_000;
     const delay = Math.max(0, scheduledAt.getTime() - leadMs - Date.now());
@@ -50,6 +66,8 @@ export class BullDispatchQueue implements DispatchQueue {
 @Injectable()
 export class NoopDispatchQueue implements DispatchQueue {
   async enqueueAttempt() {}
+
+  async removeAttempts() {}
 
   async scheduleRelease() {}
 }

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BookingsModule } from '../bookings/bookings.module.js';
 import { FleetModule } from '../fleet/fleet.module.js';
 import { QueueModule } from '../jobs/queue.module.js';
+import { BookingCandidatesController } from './booking-candidates.controller.js';
 import { DispatchJobsService } from './dispatch-jobs.service.js';
 import { DispatchListener } from './dispatch.listener.js';
 import { DriverOffersController } from './driver-offers.controller.js';
@@ -11,7 +12,7 @@ import { OfferCloseListener } from './offer-close.listener.js';
 
 @Module({
   imports: [BookingsModule, FleetModule, QueueModule],
-  controllers: [DriverOffersController],
+  controllers: [DriverOffersController, BookingCandidatesController],
   providers: [
     MatchingService,
     DispatchJobsService,

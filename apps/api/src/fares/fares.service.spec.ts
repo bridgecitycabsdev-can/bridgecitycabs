@@ -23,7 +23,12 @@ function service() {
     vehicleType: { findUnique: vi.fn(async () => null) },
     fareRule: { findUnique: vi.fn() },
   };
-  const fares = new FaresService(prisma as never, { estimate: vi.fn() } as never);
+  const fares = new FaresService(
+    prisma as never,
+    { estimate: vi.fn() } as never,
+    { estimate: vi.fn() } as never,
+    { get: () => undefined } as never,
+  );
   return { fares, prisma };
 }
 
@@ -36,7 +41,9 @@ describe('FaresService quote branch', () => {
         { userId: 'user-1', role: 'passenger', branchId: 'branch-own' },
       ),
     ).rejects.toThrow();
-    expect(own.prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: 'branch-own' } });
+    expect(own.prisma.branch.findUnique).toHaveBeenCalledWith({
+      where: { id: 'branch-own' },
+    });
 
     const named = service();
     await expect(
@@ -45,11 +52,17 @@ describe('FaresService quote branch', () => {
         { userId: 'user-1', role: 'passenger', branchId: null },
       ),
     ).rejects.toThrow();
-    expect(named.prisma.branch.findUnique).toHaveBeenCalledWith({ where: { id: 'branch-named' } });
+    expect(named.prisma.branch.findUnique).toHaveBeenCalledWith({
+      where: { id: 'branch-named' },
+    });
 
     const missing = service();
     await expect(
-      missing.fares.quote(quote, { userId: 'user-1', role: 'passenger', branchId: null }),
+      missing.fares.quote(quote, {
+        userId: 'user-1',
+        role: 'passenger',
+        branchId: null,
+      }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(missing.prisma.branch.findUnique).not.toHaveBeenCalled();
   });
@@ -57,7 +70,11 @@ describe('FaresService quote branch', () => {
   it('still refuses a staff user with no branch', async () => {
     const { fares, prisma } = service();
     await expect(
-      fares.quote(quote, { userId: 'user-1', role: 'dispatcher', branchId: null }),
+      fares.quote(quote, {
+        userId: 'user-1',
+        role: 'dispatcher',
+        branchId: null,
+      }),
     ).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.branch.findUnique).not.toHaveBeenCalled();
   });

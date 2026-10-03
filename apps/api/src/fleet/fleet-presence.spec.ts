@@ -70,6 +70,9 @@ describe('fleet presence', () => {
       {
         distanceMeters: 1200,
         quotedFareCents: 2500,
+        paymentMethod: 'CASH',
+        vanOnly: false,
+        ladyDriverOnly: true,
         notes: 'Side door',
         passengerName: 'Leila Hassan',
         passengerFirstName: null,
@@ -89,6 +92,9 @@ describe('fleet presence', () => {
       distanceToPickupM: 640,
       tripDistanceM: 1200,
       quotedFareCents: 2500,
+      paymentMethod: 'CASH',
+      vanOnly: false,
+      ladyDriverOnly: true,
       passengerFirstName: 'Leila',
       notes: 'Side door',
     });

@@ -2,6 +2,8 @@ import { SOCKET_EVENTS, createSocket, socketPayloads } from '@bridgecabs/api-cli
 import type { QueryClient } from '@tanstack/react-query'
 import type { Socket } from 'socket.io-client'
 import { getAccessToken, useSession } from '@/app/session'
+import { useBookingUi } from '@/features/bookings/selection'
+import { useTimeoutAlerts } from '@/features/bookings/timeout-alerts'
 import { registerFleetStop, useFleet } from '@/features/fleet/store'
 import { refreshAccessToken } from '@/lib/api'
 import { env } from '@/lib/env'
@@ -41,8 +43,13 @@ function loadFleetSnapshot() {
   void queryClient?.invalidateQueries({ queryKey: ['fleet', 'drivers'] })
 }
 
-function invalidateBookings() {
+function invalidateBookings(bookingId?: string) {
   void queryClient?.invalidateQueries({ queryKey: ['bookings'] })
+  if (bookingId) {
+    void queryClient?.invalidateQueries({ queryKey: ['booking', bookingId] })
+  } else {
+    void queryClient?.invalidateQueries({ queryKey: ['booking'] })
+  }
 }
 
 function bindFleetSocket(current: Socket) {
@@ -77,8 +84,41 @@ function bindFleetSocket(current: Socket) {
     useFleet.getState().merge(parsed.data.drivers)
   })
 
-  current.on(SOCKET_EVENTS.bookingCreated, invalidateBookings)
-  current.on(SOCKET_EVENTS.bookingStatusChanged, invalidateBookings)
+  current.on(SOCKET_EVENTS.bookingCreated, (payload: unknown) => {
+    const parsed = socketPayloads[SOCKET_EVENTS.bookingCreated].safeParse(payload)
+    invalidateBookings(parsed.success ? parsed.data.id : undefined)
+  })
+  current.on(SOCKET_EVENTS.bookingStatusChanged, (payload: unknown) => {
+    const parsed = socketPayloads[SOCKET_EVENTS.bookingStatusChanged].safeParse(payload)
+    if (!parsed.success) {
+      invalidateBookings()
+      return
+    }
+    invalidateBookings(parsed.data.bookingId)
+    if (parsed.data.to === 'NO_DRIVER_FOUND') {
+      const alerts = useTimeoutAlerts.getState()
+      alerts.markTimeout()
+      alerts.playBeep()
+    }
+  })
+  current.on(SOCKET_EVENTS.bookingEdited, (payload: unknown) => {
+    const parsed = socketPayloads[SOCKET_EVENTS.bookingEdited].safeParse(payload)
+    invalidateBookings(parsed.success ? parsed.data.id : undefined)
+  })
+
+  current.on(SOCKET_EVENTS.offerCreated, (payload: unknown) => {
+    const parsed = socketPayloads[SOCKET_EVENTS.offerCreated].safeParse(payload)
+    if (!parsed.success) return
+    useBookingUi.getState().offerCreated(parsed.data)
+    invalidateBookings(parsed.data.bookingId)
+  })
+
+  current.on(SOCKET_EVENTS.offerResolved, (payload: unknown) => {
+    const parsed = socketPayloads[SOCKET_EVENTS.offerResolved].safeParse(payload)
+    if (!parsed.success) return
+    useBookingUi.getState().offerResolved(parsed.data)
+    invalidateBookings(parsed.data.bookingId)
+  })
 
   current.on(SOCKET_EVENTS.authExpiring, () => {
     void refreshAccessToken().then((token) => {

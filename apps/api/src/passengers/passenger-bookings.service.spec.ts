@@ -1,5 +1,9 @@
 import 'reflect-metadata';
-import { ConflictException, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
 import { IDEMPOTENT_KEY } from '../idempotency/idempotency.decorator.js';
@@ -24,6 +28,13 @@ const stops = [
   { address: 'Airport', lat: 49.63, lng: -112.8 },
 ];
 
+const createDto = {
+  vehicleTypeId,
+  zone: 'INSIDE_TOWN' as const,
+  quoteToken: 'signed',
+  stops,
+};
+
 function bookingRow(overrides: Record<string, unknown> = {}) {
   return {
     id: bookingId,
@@ -39,8 +50,20 @@ function bookingRow(overrides: Record<string, unknown> = {}) {
     driverId: null,
     vehicleType: { id: vehicleTypeId, name: 'Sedan' },
     stops: [
-      { sequence: 1, type: 'PICKUP', address: 'City Hall', lat: 49.69, lng: -112.84 },
-      { sequence: 2, type: 'DROPOFF', address: 'Airport', lat: 49.63, lng: -112.8 },
+      {
+        sequence: 1,
+        type: 'PICKUP',
+        address: 'City Hall',
+        lat: 49.69,
+        lng: -112.84,
+      },
+      {
+        sequence: 2,
+        type: 'DROPOFF',
+        address: 'Airport',
+        lat: 49.63,
+        lng: -112.8,
+      },
     ],
     driver: null,
     vehicle: null,
@@ -62,34 +85,45 @@ function harness() {
   };
   const prisma = {
     passenger: { findUnique: vi.fn(async () => ({ ...passenger })) },
-    vehicleType: { findUnique: vi.fn(async () => ({ id: vehicleTypeId, active: true })) },
+    vehicleType: {
+      findUnique: vi.fn(async () => ({ id: vehicleTypeId, active: true })),
+    },
     booking,
-    $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
-  };
-  const state = {
-    transition: vi.fn(
-      async (): Promise<Record<string, unknown>> => ({
-        bookingId,
-        from: 'CREATED',
-        to: 'SEARCHING_DRIVER',
-      }),
+    $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) =>
+      fn(tx),
     ),
   };
+  const state = {
+    transition: vi.fn(async (): Promise<Record<string, unknown>> => ({
+      bookingId,
+      from: 'CREATED',
+      to: 'SEARCHING_DRIVER',
+    })),
+  };
   const fares = {
-    quote: vi.fn(async () => ({
-      distanceMeters: 1000,
-      durationSeconds: 120,
+    quote: vi.fn(),
+    acceptQuote: vi.fn(() => ({
+      distanceM: 1000,
+      durationS: 120,
       subtotalCents: 1500,
       taxCents: 75,
       totalCents: 1575,
     })),
+    quotes: vi.fn(async () => ({ distanceM: 900, options: [] })),
   };
   const fleet = {
     clearOfferedDrivers: vi.fn(async () => undefined),
-    sharedPosition: vi.fn(async () => ({ lat: 49.7, lng: -112.83, heading: 12, ts: 10 })),
+    sharedPosition: vi.fn(async () => ({
+      lat: 49.7,
+      lng: -112.83,
+      heading: 12,
+      ts: 10,
+    })),
   };
   const events = { emitAsync: vi.fn(async () => []) };
-  const distance = { estimate: vi.fn(async () => ({ meters: 800, seconds: 90 })) };
+  const distance = {
+    estimate: vi.fn(async () => ({ meters: 800, seconds: 90 })),
+  };
   const config = { get: vi.fn(() => undefined) } as unknown as ConfigService;
   const service = new PassengerBookingsService(
     prisma as never,
@@ -105,12 +139,9 @@ function harness() {
 
 describe('PassengerBookingsService', () => {
   it('creates an automatic passenger-app booking and opens the search', async () => {
-    const { service, tx, state, events } = harness();
+    const { service, tx, state, events, fares, distance } = harness();
 
-    const view = await service.create(
-      { vehicleTypeId, zone: 'INSIDE_TOWN', stops },
-      user,
-    );
+    const view = await service.create(createDto, user);
 
     expect(tx.booking.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -119,12 +150,21 @@ describe('PassengerBookingsService', () => {
           assignMode: 'AUTO',
           passengerId: 'passenger-1',
           passengerPhone: '+14035550100',
+          quotedFareCents: 1500,
+          quotedTaxCents: 75,
+          distanceMeters: 1000,
         }),
       }),
     );
+    expect(fares.acceptQuote).toHaveBeenCalled();
+    expect(fares.quote).not.toHaveBeenCalled();
+    expect(distance.estimate).not.toHaveBeenCalled();
     expect(tx.bookingStatusHistory.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ actorType: 'PASSENGER', actorUserId: 'user-1' }),
+        data: expect.objectContaining({
+          actorType: 'PASSENGER',
+          actorUserId: 'user-1',
+        }),
       }),
     );
     expect(state.transition).toHaveBeenCalledWith(
@@ -144,17 +184,20 @@ describe('PassengerBookingsService', () => {
 
   it('refuses a blocked passenger and a second active booking', async () => {
     const blocked = harness();
-    blocked.prisma.passenger.findUnique.mockResolvedValue({ ...passenger, blocked: true });
+    blocked.prisma.passenger.findUnique.mockResolvedValue({
+      ...passenger,
+      blocked: true,
+    });
     await expect(
-      blocked.service.create({ vehicleTypeId, zone: 'INSIDE_TOWN', stops }, user),
+      blocked.service.create(createDto, user),
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
-    expect(blocked.fares.quote).not.toHaveBeenCalled();
+    expect(blocked.fares.acceptQuote).not.toHaveBeenCalled();
 
     const busy = harness();
     busy.prisma.booking.findFirst.mockResolvedValue({ id: 'already' });
-    await expect(
-      busy.service.create({ vehicleTypeId, zone: 'INSIDE_TOWN', stops }, user),
-    ).rejects.toThrow('You already have an active booking');
+    await expect(busy.service.create(createDto, user)).rejects.toThrow(
+      'You already have an active booking',
+    );
     expect(busy.tx.booking.create).not.toHaveBeenCalled();
   });
 
@@ -178,7 +221,9 @@ describe('PassengerBookingsService', () => {
     expect(JSON.stringify(matched)).not.toMatch(/phone/i);
 
     prisma.booking.findFirst.mockResolvedValue(null);
-    await expect(service.get(user, bookingId)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.get(user, bookingId)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
   });
 
   it('shows the assigned driver and a straight-line ETA, without a phone number', async () => {
@@ -217,8 +262,15 @@ describe('PassengerBookingsService', () => {
 
   it('cancels before the trip starts and refuses once the trip has started', async () => {
     const { service, prisma, state, events } = harness();
-    prisma.booking.findFirst.mockResolvedValue({ id: bookingId, status: 'MATCHED' });
-    state.transition.mockResolvedValue({ bookingId, from: 'MATCHED', to: 'CANCELLED' });
+    prisma.booking.findFirst.mockResolvedValue({
+      id: bookingId,
+      status: 'MATCHED',
+    });
+    state.transition.mockResolvedValue({
+      bookingId,
+      from: 'MATCHED',
+      to: 'CANCELLED',
+    });
 
     await service.cancel(user, bookingId, {});
 
@@ -227,7 +279,10 @@ describe('PassengerBookingsService', () => {
       'CANCELLED',
       { type: 'PASSENGER', userId: 'user-1' },
       expect.objectContaining({
-        patch: expect.objectContaining({ cancelledBy: 'PASSENGER', cancelReason: 'PASSENGER_REQUEST' }),
+        patch: expect.objectContaining({
+          cancelledBy: 'PASSENGER',
+          cancelReason: 'PASSENGER_REQUEST',
+        }),
       }),
     );
     expect(events.emitAsync).toHaveBeenCalledWith(
@@ -236,14 +291,22 @@ describe('PassengerBookingsService', () => {
     );
 
     const started = harness();
-    started.prisma.booking.findFirst.mockResolvedValue({ id: bookingId, status: 'TRIP_STARTED' });
-    await expect(started.service.cancel(user, bookingId, {})).rejects.toBeInstanceOf(ConflictException);
+    started.prisma.booking.findFirst.mockResolvedValue({
+      id: bookingId,
+      status: 'TRIP_STARTED',
+    });
+    await expect(
+      started.service.cancel(user, bookingId, {}),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(started.state.transition).not.toHaveBeenCalled();
   });
 
   it('retries a search from NO_DRIVER_FOUND and starts the window over', async () => {
     const { service, prisma, fleet, state } = harness();
-    prisma.booking.findFirst.mockResolvedValue({ id: bookingId, status: 'NO_DRIVER_FOUND' });
+    prisma.booking.findFirst.mockResolvedValue({
+      id: bookingId,
+      status: 'NO_DRIVER_FOUND',
+    });
 
     await service.retry(user, bookingId);
 
@@ -258,16 +321,24 @@ describe('PassengerBookingsService', () => {
     );
 
     const searching = harness();
-    searching.prisma.booking.findFirst.mockResolvedValue({ id: bookingId, status: 'SEARCHING_DRIVER' });
-    await expect(searching.service.retry(user, bookingId)).rejects.toBeInstanceOf(ConflictException);
+    searching.prisma.booking.findFirst.mockResolvedValue({
+      id: bookingId,
+      status: 'SEARCHING_DRIVER',
+    });
+    await expect(
+      searching.service.retry(user, bookingId),
+    ).rejects.toBeInstanceOf(ConflictException);
     expect(searching.fleet.clearOfferedDrivers).not.toHaveBeenCalled();
   });
 });
 
 describe('PassengerBookingsController', () => {
   it('requires an idempotency key on create', () => {
-    expect(Reflect.getMetadata(IDEMPOTENT_KEY, PassengerBookingsController.prototype.create)).toBe(
-      true,
-    );
+    expect(
+      Reflect.getMetadata(
+        IDEMPOTENT_KEY,
+        PassengerBookingsController.prototype.create,
+      ),
+    ).toBe(true);
   });
 });

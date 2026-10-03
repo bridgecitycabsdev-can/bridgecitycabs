@@ -66,6 +66,9 @@ export function driverOfferSnapshot(
   booking: {
     distanceMeters: number;
     quotedFareCents: number;
+    paymentMethod: 'CASH' | 'CARD' | 'WALLET' | 'ACCOUNT';
+    vanOnly: boolean;
+    ladyDriverOnly: boolean;
     notes: string | null;
     passengerName: string;
     passengerFirstName: string | null | undefined;
@@ -87,6 +90,9 @@ export function driverOfferSnapshot(
     distanceToPickupM: offer.distanceToPickupM,
     tripDistanceM: booking.distanceMeters,
     quotedFareCents: booking.quotedFareCents,
+    paymentMethod: booking.paymentMethod,
+    vanOnly: booking.vanOnly,
+    ladyDriverOnly: booking.ladyDriverOnly,
     passengerFirstName: passengerFirstName(booking.passengerFirstName, booking.passengerName),
     notes: booking.notes,
   };

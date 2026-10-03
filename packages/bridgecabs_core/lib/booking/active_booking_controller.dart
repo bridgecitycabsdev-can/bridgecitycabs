@@ -17,7 +17,9 @@ class ActiveBookingController extends AsyncNotifier<ActiveBooking?> {
           .read(apiClientProvider)
           .dio
           .get<dynamic>('/passenger/bookings/active');
-      return ActiveBooking.tryParse(response.data);
+      final booking = ActiveBooking.tryParse(response.data);
+      if (booking == null || booking.isTerminal) return null;
+      return booking;
     } on DioException catch (error) {
       if (error.response?.statusCode == 404) return null;
       rethrow;
@@ -25,6 +27,19 @@ class ActiveBookingController extends AsyncNotifier<ActiveBooking?> {
   }
 
   void apply(ActiveBooking booking) {
+    if (booking.isTerminal) {
+      state = const AsyncData(null);
+      return;
+    }
     state = AsyncData(booking);
+  }
+
+  void clear() {
+    state = const AsyncData(null);
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(build);
   }
 }

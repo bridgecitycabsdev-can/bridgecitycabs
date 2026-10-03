@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Inject,
   Injectable,
   InternalServerErrorException,
@@ -10,6 +11,8 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, Prisma } from '@prisma/client';
+import { ApiCode } from '../common/api-code.js';
+import { ApiException } from '../common/api-exception.js';
 import { assertScheduledAt } from '../bookings/booking-schedule.js';
 import { BookingStateService } from '../bookings/booking-state.service.js';
 import { TRANSITIONS } from '../bookings/booking-transitions.js';
@@ -72,15 +75,32 @@ export class PassengerBookingsService {
       );
     }
 
-    const quote = await this.fares.quote(
-      {
-        branchId: dto.branchId,
-        vehicleTypeId: dto.vehicleTypeId,
-        zone: dto.zone,
-        stops: dto.stops,
-      },
-      user,
-    );
+    if (!dto.quoteToken) {
+      throw new ApiException(
+        HttpStatus.BAD_REQUEST,
+        ApiCode.VALIDATION,
+        'Validation failed',
+        {
+          quoteToken: 'A quote is required',
+        },
+      );
+    }
+    const branchId = await this.branchIdFor(user, dto.branchId);
+    const accepted = this.fares.acceptQuote(dto.quoteToken, {
+      branchId,
+      vehicleTypeId: dto.vehicleTypeId,
+      zone: dto.zone,
+      stops: dto.stops,
+    });
+    if (!accepted) {
+      throw new ApiException(
+        HttpStatus.CONFLICT,
+        ApiCode.QUOTE_EXPIRED,
+        'Quote expired',
+        undefined,
+        await this.fares.quotes({ stops: dto.stops, branchId }, user),
+      );
+    }
 
     const initial: BookingStatus = scheduledAt ? 'SCHEDULED' : 'CREATED';
     const openedAt = new Date(Date.now() - 1);
@@ -98,10 +118,10 @@ export class PassengerBookingsService {
       scheduledAt,
       initial,
       openedAt,
-      meters: quote.distanceMeters,
-      seconds: quote.durationSeconds,
-      subtotalCents: quote.subtotalCents,
-      taxCents: quote.taxCents,
+      meters: accepted.distanceM,
+      seconds: accepted.durationS,
+      subtotalCents: accepted.subtotalCents,
+      taxCents: accepted.taxCents,
     });
 
     const row = await this.load(inserted.id);
@@ -166,7 +186,11 @@ export class PassengerBookingsService {
     return toPassengerBooking(booking, await this.etaSeconds(booking));
   }
 
-  async cancel(user: AuthUser, id: string, dto: PassengerCancelBookingDto = {}) {
+  async cancel(
+    user: AuthUser,
+    id: string,
+    dto: PassengerCancelBookingDto = {},
+  ) {
     const passenger = await this.requireAccount(user);
     const reason = dto.reason ?? 'PASSENGER_REQUEST';
     const note = dto.note?.trim() || null;
@@ -215,7 +239,9 @@ export class PassengerBookingsService {
     });
     if (!booking) throw new NotFoundException();
     if (booking.status !== 'NO_DRIVER_FOUND') {
-      throw new ConflictException('Only a booking with no driver can be retried');
+      throw new ConflictException(
+        'Only a booking with no driver can be retried',
+      );
     }
     await this.fleet.clearOfferedDrivers(booking.id);
     const result = await this.state.transition(
@@ -351,11 +377,15 @@ export class PassengerBookingsService {
       booking.status === 'DRIVER_ARRIVING' ||
       booking.status === 'TRIP_STARTED';
     if (!moving || !booking.driverId) return null;
-    if (!PASSENGER_SHARE_LOCATION_STATUSES.includes(booking.status)) return null;
+    if (!PASSENGER_SHARE_LOCATION_STATUSES.includes(booking.status))
+      return null;
     const position = await this.fleet.sharedPosition(booking.driverId);
     if (!position) return null;
-    const stops = [...booking.stops].sort((left, right) => left.sequence - right.sequence);
-    const target = booking.status === 'TRIP_STARTED' ? stops[stops.length - 1] : stops[0];
+    const stops = [...booking.stops].sort(
+      (left, right) => left.sequence - right.sequence,
+    );
+    const target =
+      booking.status === 'TRIP_STARTED' ? stops[stops.length - 1] : stops[0];
     if (!target) return null;
     const trip = await this.distance.estimate(
       { lat: position.lat, lng: position.lng },
@@ -393,7 +423,9 @@ export class PassengerBookingsService {
 }
 
 function pickupAddress(row: PassengerBookingRow) {
-  const pickup = [...row.stops].sort((left, right) => left.sequence - right.sequence)[0];
+  const pickup = [...row.stops].sort(
+    (left, right) => left.sequence - right.sequence,
+  )[0];
   return pickup?.address ?? '';
 }
 

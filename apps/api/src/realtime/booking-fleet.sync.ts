@@ -72,4 +72,29 @@ export class BookingFleetSync {
       );
     }
   }
+
+  @OnEvent('booking.edited')
+  async onEdited(event: {
+    id: string;
+    branchId: string;
+    driverId: string | null;
+    notesChanged: boolean;
+  }) {
+    try {
+      this.broadcaster.emitEdited(event.branchId, {
+        id: event.id,
+        branchId: event.branchId,
+      });
+      if (!event.notesChanged || !event.driverId) return;
+      const result = await this.fleet.republishSnapshot(event.driverId);
+      if (!result) return;
+      this.drivers.emitState(result.driverId, result.snapshot);
+    } catch (error) {
+      this.logger.error(
+        `Booking ${event.id} edit did not reach the driver: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
 }

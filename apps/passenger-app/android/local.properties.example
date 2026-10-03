@@ -1,0 +1,4 @@
+## Copy to local.properties (gitignored). Restrict this key by package name + SHA-1.
+sdk.dir=/path/to/Android/sdk
+flutter.sdk=/path/to/flutter
+MAPS_API_KEY=YOUR_ANDROID_MAPS_SDK_KEY

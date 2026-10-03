@@ -44,6 +44,7 @@ function harness() {
   const events = { emitAsync: vi.fn(async () => []) };
   const queue = {
     enqueueAttempt: vi.fn(async () => undefined),
+    removeAttempts: vi.fn(async () => undefined),
     scheduleRelease: vi.fn(async () => undefined),
   };
   const jobs = new DispatchJobsService(

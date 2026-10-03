@@ -94,7 +94,11 @@ describe('offer reconcile after a Redis flush', () => {
       expect.objectContaining({ offerId, bookingId, driverId, outcome: 'EXPIRED' }),
     ]);
 
-    const queue = { enqueueAttempt: vi.fn(async () => undefined), scheduleRelease: vi.fn() };
+    const queue = {
+      enqueueAttempt: vi.fn(async () => undefined),
+      removeAttempts: vi.fn(async () => undefined),
+      scheduleRelease: vi.fn(),
+    };
     const jobs = new DispatchJobsService(
       {
         booking: {

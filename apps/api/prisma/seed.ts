@@ -107,8 +107,11 @@ const DOCUMENT_TYPES = [
 async function main() {
   const email = process.env.SEED_ADMIN_EMAIL;
   const password = process.env.SEED_ADMIN_PASSWORD;
-  if (!email || !password) {
-    throw new Error('SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD must be set');
+  const displayName = process.env.SEED_ADMIN_NAME;
+  if (!email || !password || !displayName) {
+    throw new Error(
+      'SEED_ADMIN_EMAIL, SEED_ADMIN_PASSWORD, and SEED_ADMIN_NAME must be set',
+    );
   }
 
   const roles = new Map<string, string>();
@@ -161,6 +164,8 @@ async function main() {
           timezone: 'America/Edmonton',
           currency: 'CAD',
           gstRateBps: 500,
+          centerLat: 49.6935,
+          centerLng: -112.8418,
         },
       })
     : await prisma.branch.create({
@@ -171,6 +176,8 @@ async function main() {
           timezone: 'America/Edmonton',
           currency: 'CAD',
           gstRateBps: 500,
+          centerLat: 49.6935,
+          centerLng: -112.8418,
         },
       });
 
@@ -184,12 +191,14 @@ async function main() {
     where: { email },
     update: {
       passwordHash,
+      displayName,
       roleId: superAdminRoleId,
       branchId: branch.id,
       isActive: true,
     },
     create: {
       email,
+      displayName,
       passwordHash,
       roleId: superAdminRoleId,
       branchId: branch.id,
@@ -527,15 +536,25 @@ async function ensureAssignment(driverId: string, vehicleId: string) {
   });
 }
 
-async function ensureDemoDocuments(pairs: { driverId: string; vehicleId: string }[]) {
-  const required = await prisma.documentType.findMany({ where: { required: true } });
+async function ensureDemoDocuments(
+  pairs: { driverId: string; vehicleId: string }[],
+) {
+  const required = await prisma.documentType.findMany({
+    where: { required: true },
+  });
   const expiresAt = new Date('2030-01-01T00:00:00.000Z');
   for (const pair of pairs) {
     for (const documentType of required) {
       const driverId = documentType.owner === 'DRIVER' ? pair.driverId : null;
-      const vehicleId = documentType.owner === 'VEHICLE' ? pair.vehicleId : null;
+      const vehicleId =
+        documentType.owner === 'VEHICLE' ? pair.vehicleId : null;
       const existing = await prisma.document.findFirst({
-        where: { documentTypeId: documentType.id, driverId, vehicleId, status: 'APPROVED' },
+        where: {
+          documentTypeId: documentType.id,
+          driverId,
+          vehicleId,
+          status: 'APPROVED',
+        },
       });
       if (existing) continue;
       await prisma.document.create({

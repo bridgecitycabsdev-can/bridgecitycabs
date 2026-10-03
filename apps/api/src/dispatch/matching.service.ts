@@ -40,6 +40,16 @@ const bookingSelect = {
   },
 } satisfies Prisma.BookingSelect;
 
+const NEARBY_FIELDS = [
+  DRIVER_HASH_FIELDS.status,
+  DRIVER_HASH_FIELDS.vehicleType,
+  DRIVER_HASH_FIELDS.ladyDriverEligible,
+  DRIVER_HASH_FIELDS.ts,
+  DRIVER_HASH_FIELDS.name,
+  DRIVER_HASH_FIELDS.unit,
+  DRIVER_HASH_FIELDS.vehicleId,
+] as const;
+
 const HASH_FIELDS = [
   DRIVER_HASH_FIELDS.status,
   DRIVER_HASH_FIELDS.vehicleType,
@@ -56,6 +66,25 @@ export type MatchCandidate = {
   vehicleId: string;
   distanceM: number;
   availableSince: number | null;
+};
+
+export const CANDIDATE_REASONS = [
+  'VEHICLE_TYPE_MISMATCH',
+  'NOT_VAN',
+  'NOT_LADY_ELIGIBLE',
+  'STALE_LOCATION',
+] as const;
+
+export type CandidateReason = (typeof CANDIDATE_REASONS)[number];
+
+export type NearbyDriver = {
+  driverId: string;
+  name: string;
+  unit: string;
+  vehicleId: string;
+  distanceM: number;
+  eligible: boolean;
+  reasons: CandidateReason[];
 };
 
 @Injectable()
@@ -169,6 +198,60 @@ export class MatchingService {
       }
     }
     return null;
+  }
+
+  /**
+   * Drivers currently marked available within the radius, nearest first.
+   * Nothing is reserved and nobody is offered.
+   */
+  async listNearby(bookingId: string, radiusKm: number): Promise<NearbyDriver[]> {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: bookingSelect,
+    });
+    if (!booking) return [];
+    const pickup = booking.stops.find((stop) => stop.type === 'PICKUP') ?? booking.stops[0];
+    if (!pickup) return [];
+
+    const raw = await this.redis.call(
+      'GEOSEARCH',
+      geoAvailableKey(booking.branchId),
+      'FROMLONLAT',
+      String(pickup.lng),
+      String(pickup.lat),
+      'BYRADIUS',
+      String(radiusKm),
+      'km',
+      'ASC',
+      'COUNT',
+      String(CANDIDATE_COUNT),
+      'WITHDIST',
+    );
+    const hits = parseGeoHits(raw);
+    if (!hits.length) return [];
+
+    const pipe = this.redis.pipeline();
+    for (const hit of hits) {
+      pipe.hmget(driverKey(hit.driverId), ...NEARBY_FIELDS);
+    }
+    const rows = await pipe.exec();
+    const nowMs = Date.now();
+    const maxAgeSeconds = this.readInt('DRIVER_LOCATION_MAX_AGE_SECONDS', 30);
+    const nearby: NearbyDriver[] = [];
+    hits.forEach((hit, index) => {
+      const row = rows?.[index];
+      if (!row || row[0]) return;
+      const fields = row[1] as (string | null)[];
+      const driver = describeNearby(hit, fields, {
+        bookingVehicleType: booking.vehicleType.name,
+        vanOnly: booking.vanOnly,
+        ladyDriverOnly: booking.ladyDriverOnly,
+        nowMs,
+        maxAgeSeconds,
+      });
+      if (driver) nearby.push(driver);
+    });
+    return nearby.sort((left, right) => left.distanceM - right.distanceM);
   }
 
   private async rankEligible(
@@ -309,6 +392,40 @@ export function rankCandidates<T extends MatchCandidate>(candidates: readonly T[
     if (leftWait !== rightWait) return leftWait - rightWait;
     return left.distanceM - right.distanceM;
   });
+}
+
+export function describeNearby(
+  hit: { driverId: string; distanceM: number },
+  fields: (string | null)[],
+  rule: {
+    bookingVehicleType: string;
+    vanOnly: boolean;
+    ladyDriverOnly: boolean;
+    nowMs: number;
+    maxAgeSeconds: number;
+  },
+): NearbyDriver | null {
+  const [status, vehicleType, ladyDriverEligible, ts, name, unit, vehicleId] = fields;
+  if (status !== 'AVAILABLE' || !vehicleId) return null;
+  const reasons: CandidateReason[] = [];
+  const seenAt = Number(ts);
+  if (!Number.isFinite(seenAt) || rule.nowMs - seenAt > rule.maxAgeSeconds * 1000) {
+    reasons.push('STALE_LOCATION');
+  }
+  const driverType = (vehicleType ?? '').trim().toLowerCase();
+  const wanted = rule.bookingVehicleType.trim().toLowerCase();
+  if (!driverType || driverType !== wanted) reasons.push('VEHICLE_TYPE_MISMATCH');
+  if (rule.vanOnly && driverType !== 'minivan') reasons.push('NOT_VAN');
+  if (rule.ladyDriverOnly && ladyDriverEligible !== '1') reasons.push('NOT_LADY_ELIGIBLE');
+  return {
+    driverId: hit.driverId,
+    name: (name ?? '').trim(),
+    unit: (unit ?? '').trim(),
+    vehicleId,
+    distanceM: hit.distanceM,
+    eligible: reasons.length === 0,
+    reasons,
+  };
 }
 
 function toCandidate(

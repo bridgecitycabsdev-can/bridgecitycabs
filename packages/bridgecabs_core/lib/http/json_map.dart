@@ -17,3 +17,14 @@ String errorMessage(Object error) {
   }
   return 'Something went wrong. Try again.';
 }
+
+String? errorCode(Object error) {
+  if (error is! DioException) return null;
+  final code = jsonMap(error.response?.data)?['code'];
+  return code is String && code.isNotEmpty ? code : null;
+}
+
+Map<String, dynamic>? errorBody(Object error) {
+  if (error is! DioException) return null;
+  return jsonMap(error.response?.data);
+}

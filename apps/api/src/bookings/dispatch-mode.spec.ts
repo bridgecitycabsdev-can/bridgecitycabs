@@ -14,6 +14,13 @@ function harness(status = 'SEARCHING_DRIVER', assignMode = 'AUTO') {
     status,
     assignMode,
     version: 3,
+    source: 'DISPATCH',
+    createdById: null,
+    driver: null,
+    vehicle: null,
+    stops: [],
+    assignments: [],
+    offers: [],
     vanOnly: false,
     ladyDriverOnly: false,
   };
@@ -54,6 +61,7 @@ function harness(status = 'SEARCHING_DRIVER', assignMode = 'AUTO') {
   };
   const prisma = {
     booking: tx.booking,
+    user: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) => fn(tx)),
   };
   const state = {
@@ -69,7 +77,10 @@ function harness(status = 'SEARCHING_DRIVER', assignMode = 'AUTO') {
   };
   const events = { emitAsync: vi.fn(async (..._args: unknown[]) => undefined) };
   const expiry = { cancel: vi.fn(async () => undefined) };
-  const dispatch = { enqueueAttempt: vi.fn(async () => undefined) };
+  const dispatch = {
+    enqueueAttempt: vi.fn(async () => undefined),
+    removeAttempts: vi.fn(async () => undefined),
+  };
   const service = new BookingsService(
     prisma as never,
     state as never,
@@ -77,6 +88,7 @@ function harness(status = 'SEARCHING_DRIVER', assignMode = 'AUTO') {
     { get: () => undefined } as never,
     events as never,
     { estimate: async () => ({ meters: 1, seconds: 1 }) } as never,
+    {} as never,
     expiry as never,
     dispatch as never,
   );
@@ -160,6 +172,7 @@ describe('dispatch mode', () => {
       expect.objectContaining({ outcome: 'CANCELLED' }),
     );
     expect(dispatch.enqueueAttempt).not.toHaveBeenCalled();
+    expect(dispatch.removeAttempts).toHaveBeenCalledWith(bookingId);
   });
 
   it('switches a searching booking to manual without a new status', async () => {
@@ -173,6 +186,7 @@ describe('dispatch mode', () => {
       data: { assignMode: 'MANUAL' },
     });
     expect(dispatch.enqueueAttempt).not.toHaveBeenCalled();
+    expect(dispatch.removeAttempts).toHaveBeenCalledWith(bookingId);
   });
 
   it('resumes auto search when the booking is already searching', async () => {
@@ -185,6 +199,7 @@ describe('dispatch mode', () => {
       data: { assignMode: 'AUTO' },
     });
     expect(dispatch.enqueueAttempt).toHaveBeenCalledWith(bookingId, 4);
+    expect(dispatch.removeAttempts).not.toHaveBeenCalled();
   });
 
   it('refuses a mode change after the trip has started', async () => {

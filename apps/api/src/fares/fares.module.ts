@@ -3,6 +3,7 @@ import {
   DISTANCE_SERVICE,
   HaversineDistanceService,
 } from './distance.service.js';
+import { GoogleRoutesDistanceService } from './google-routes.distance.js';
 import { FareRulesController } from './fare-rules.controller.js';
 import { FareRulesService } from './fare-rules.service.js';
 import { FaresController } from './fares.controller.js';
@@ -13,6 +14,8 @@ import { FaresService } from './fares.service.js';
   providers: [
     FareRulesService,
     FaresService,
+    HaversineDistanceService,
+    GoogleRoutesDistanceService,
     { provide: DISTANCE_SERVICE, useClass: HaversineDistanceService },
   ],
   exports: [FareRulesService, FaresService, DISTANCE_SERVICE],

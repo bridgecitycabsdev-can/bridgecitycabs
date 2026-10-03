@@ -716,6 +716,28 @@ export class FleetStateService {
     await this.exec(pipe);
   }
 
+  /** Notes changed on an assigned trip. Bump v and rebuild the snapshot the driver already has. */
+  async republishSnapshot(driverId: string) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { id: driverId },
+      select: { id: true, branchId: true },
+    });
+    if (!driver) return null;
+    const version = await this.prisma.$transaction((tx) => this.bump(tx, driverId));
+    if (await this.redis.exists(driverKey(driverId))) {
+      await this.redis.hset(
+        driverKey(driverId),
+        DRIVER_HASH_FIELDS.version,
+        String(version),
+      );
+    }
+    return {
+      driverId,
+      branchId: driver.branchId,
+      snapshot: await this.snapshot(driverId),
+    };
+  }
+
   private async snapshot(driverId: string) {
     const [driver, shift, booking, hash] = await Promise.all([
       this.prisma.driver.findUnique({
@@ -735,6 +757,9 @@ export class FleetStateService {
           scheduledAt: true,
           notes: true,
           quotedFareCents: true,
+          paymentMethod: true,
+          vanOnly: true,
+          ladyDriverOnly: true,
           distanceMeters: true,
           passenger: { select: { firstName: true } },
           stops: {
@@ -811,6 +836,9 @@ export class FleetStateService {
               {
                 distanceMeters: booking.distanceMeters,
                 quotedFareCents: booking.quotedFareCents,
+                paymentMethod: booking.paymentMethod,
+                vanOnly: booking.vanOnly,
+                ladyDriverOnly: booking.ladyDriverOnly,
                 notes: booking.notes,
                 passengerName: booking.passengerName,
                 passengerFirstName: booking.passenger?.firstName,

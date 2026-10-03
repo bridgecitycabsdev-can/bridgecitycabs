@@ -2,6 +2,11 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { z } from 'zod'
 import { useSession } from '@/app/session'
+import { Button } from '@/components/ui/button'
+import { useOpsPanels } from '@/features/bookings/ops-panels'
+import { useBookingUi } from '@/features/bookings/selection'
+import { useTimeoutAlerts } from '@/features/bookings/timeout-alerts'
+import { useDrafts } from '@/features/dispatch/drafts/store'
 import { api, jsonBody } from '@/lib/api'
 
 const TABS = ['unassigned', 'assigned', 'active'] as const
@@ -49,8 +54,48 @@ const pageSchema = z.object({
 })
 
 export function BookingLists() {
+  const openSearch = useBookingUi((state) => state.openSearch)
+  const openTimeout = useOpsPanels((state) => state.openTimeout)
+  const openClosed = useOpsPanels((state) => state.openClosed)
+  const badge = useTimeoutAlerts((state) => state.badge)
+  const soundEnabled = useTimeoutAlerts((state) => state.soundEnabled)
+  const setSoundEnabled = useTimeoutAlerts((state) => state.setSoundEnabled)
+  const primeAudio = useTimeoutAlerts((state) => state.primeAudio)
+
   return (
     <div className="flex h-full min-h-0 flex-col">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+        <h2 className="text-sm font-semibold">Jobs</h2>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <label className="text-muted-foreground inline-flex items-center gap-1 text-[11px]">
+            <input
+              type="checkbox"
+              aria-label="Sound alerts"
+              checked={soundEnabled}
+              onChange={(event) => {
+                const next = event.target.checked
+                setSoundEnabled(next)
+                if (next) primeAudio()
+              }}
+            />
+            Sound alerts
+          </label>
+          <Button type="button" size="xs" variant="outline" onClick={openSearch}>
+            Search
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={openTimeout}>
+            Timeout
+            {badge > 0 ? (
+              <span className="bg-destructive text-destructive-foreground ml-1 inline-flex min-w-4 justify-center rounded-full px-1 text-[10px] leading-4">
+                {badge > 99 ? '99+' : badge}
+              </span>
+            ) : null}
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={openClosed}>
+            Closed
+          </Button>
+        </div>
+      </div>
       {ZONES.map((zone) => (
         <ZoneBoard key={zone.id} zone={zone.id} title={zone.title} />
       ))}
@@ -65,6 +110,9 @@ function ZoneBoard({ zone, title }: { zone: ZoneId; title: string }) {
   const ownBranchId = useSession((state) => state.profile?.branch?.id)
   const branchId = role === 'super_admin' ? selectedBranchId : ownBranchId
   const waitingForBranch = role === 'super_admin' && !branchId
+  const selectedId = useBookingUi((state) => state.selectedId)
+  const openJob = useBookingUi((state) => state.openJob)
+  const selectBooking = useDrafts((state) => state.selectBooking)
   const query = useQuery({
     queryKey: ['bookings', tab, zone, branchId ?? null],
     enabled: !waitingForBranch,
@@ -122,14 +170,24 @@ function ZoneBoard({ zone, title }: { zone: ZoneId; title: string }) {
               .filter(Boolean)
               .join(' · ')
             return (
-              <li key={booking.id} className="rounded-md border px-2.5 py-2 text-sm">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="font-medium">{booking.trackingId}</span>
-                  <span className="text-muted-foreground text-xs">{booking.status}</span>
-                </div>
-                <p>{booking.passengerName}</p>
-                {pickup ? <p className="text-muted-foreground">{pickup}</p> : null}
-                {detail ? <p className="text-muted-foreground text-xs">{detail}</p> : null}
+              <li key={booking.id}>
+                <button
+                  type="button"
+                  className="w-full rounded-md border px-2.5 py-2 text-left text-sm data-[on=true]:border-primary data-[on=true]:ring-1 data-[on=true]:ring-primary"
+                  data-on={selectedId === booking.id}
+                  onClick={() => {
+                    selectBooking(booking.id)
+                    openJob(booking.id)
+                  }}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-medium">{booking.trackingId}</span>
+                    <span className="text-muted-foreground text-xs">{booking.status}</span>
+                  </div>
+                  <p>{booking.passengerName}</p>
+                  {pickup ? <p className="text-muted-foreground">{pickup}</p> : null}
+                  {detail ? <p className="text-muted-foreground text-xs">{detail}</p> : null}
+                </button>
               </li>
             )
           })}

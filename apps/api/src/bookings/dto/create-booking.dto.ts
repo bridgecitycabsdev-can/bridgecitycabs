@@ -1,4 +1,4 @@
-import { FareZone, PaymentMethod } from '@prisma/client';
+import { AssignMode, FareZone, PaymentMethod } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -59,6 +59,11 @@ export class CreateBookingDto {
   @IsEnum(FareZone)
   zone: FareZone;
 
+  /** Defaults to AUTO when the dispatcher leaves the branch setting. */
+  @IsOptional()
+  @IsEnum(AssignMode)
+  assignMode?: AssignMode;
+
   @IsOptional()
   @IsBoolean()
   vanOnly?: boolean;
@@ -85,6 +90,11 @@ export class CreateBookingDto {
   @IsInt()
   @Min(0)
   fixedFareCents?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  quoteToken?: string;
 
   @ArrayMinSize(2)
   @ArrayMaxSize(10)

@@ -65,7 +65,11 @@ function harness() {
     releaseOffer: vi.fn(async () => true),
   };
   const events = { emitAsync: vi.fn(async () => []) };
-  const queue = { enqueueAttempt: vi.fn(async () => undefined), scheduleRelease: vi.fn() };
+  const queue = {
+    enqueueAttempt: vi.fn(async () => undefined),
+    removeAttempts: vi.fn(async () => undefined),
+    scheduleRelease: vi.fn(),
+  };
   const expiry = { schedule: vi.fn(), cancel: vi.fn(async () => undefined) };
   const offers = new DriverOffersService(
     prisma as never,
@@ -215,7 +219,11 @@ describe('accept and expire', () => {
     };
     const fleet = { state: vi.fn(async () => snapshot), releaseOffer: vi.fn(async () => true) };
     const events = { emitAsync: vi.fn(async () => []) };
-    const queue = { enqueueAttempt: vi.fn(async () => undefined), scheduleRelease: vi.fn() };
+    const queue = {
+      enqueueAttempt: vi.fn(async () => undefined),
+      removeAttempts: vi.fn(async () => undefined),
+      scheduleRelease: vi.fn(),
+    };
     const expiry = { schedule: vi.fn(), cancel: vi.fn(async () => undefined) };
     const offers = new DriverOffersService(
       prisma as never,

@@ -628,6 +628,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["BookingCandidatesController_candidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings": {
         parameters: {
             query?: never;
@@ -670,6 +686,22 @@ export interface paths {
         get: operations["BookingsController_findOne"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["BookingsController_update"];
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/retry-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["BookingsController_retrySearch"];
         delete?: never;
         options?: never;
         head?: never;
@@ -820,6 +852,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/driver/bookings/{id}/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["DriverBookingController_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/fare-rules": {
         parameters: {
             query?: never;
@@ -862,6 +910,22 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["FaresController_quote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/fares/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["FaresController_quotes"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1044,6 +1108,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/passenger/fares/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["PassengerFaresController_quotes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/passenger/bookings": {
         parameters: {
             query?: never;
@@ -1132,6 +1212,70 @@ export interface paths {
             cookie?: never;
         };
         get: operations["PassengerTripController_driverLocation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/autocomplete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PlacesController_autocomplete"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/reverse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PlacesController_reverse"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/places/{placeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["PlacesController_details"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/config/dispatch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["DispatchConfigController_dispatch"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1274,12 +1418,32 @@ export interface components {
             zone: "INSIDE_TOWN" | "OUT_OF_TOWN";
             vanOnly?: boolean;
             ladyDriverOnly?: boolean;
+            /** @enum {string} */
+            assignMode?: "AUTO" | "MANUAL";
             scheduledAt?: string;
             /** @enum {string} */
             paymentMethod?: "CARD" | "CASH" | "WALLET" | "ACCOUNT";
             notes?: string;
             fixedFareCents?: number;
+            quoteToken?: string;
             stops: components["schemas"]["CreateBookingStopDto"][];
+        };
+        UpdateBookingDto: {
+            version: number;
+            passengerName?: string;
+            passengerPhone?: string;
+            /** Format: uuid */
+            vehicleTypeId?: string;
+            /** @enum {string} */
+            zone?: "INSIDE_TOWN" | "OUT_OF_TOWN";
+            vanOnly?: boolean;
+            ladyDriverOnly?: boolean;
+            scheduledAt?: string;
+            /** @enum {string} */
+            paymentMethod?: "CARD" | "CASH" | "WALLET" | "ACCOUNT";
+            notes?: string;
+            fixedFareCents?: number;
+            stops?: components["schemas"]["CreateBookingStopDto"][];
         };
         DispatchModeDto: {
             /** @enum {string} */
@@ -1305,6 +1469,9 @@ export interface components {
             /** @enum {string} */
             reason?: "PASSENGER_REQUEST" | "DRIVER_NO_SHOW" | "PASSENGER_NO_SHOW" | "DUPLICATE" | "OPERATIONAL" | "OTHER";
             note?: string;
+        };
+        ReleaseBookingDto: {
+            reason: string;
         };
         CreateFareRuleDto: {
             /** Format: uuid */
@@ -1347,6 +1514,13 @@ export interface components {
             zone: "INSIDE_TOWN" | "OUT_OF_TOWN";
             stops: components["schemas"]["QuoteStopDto"][];
         };
+        QuoteBatchDto: {
+            /** Format: uuid */
+            branchId?: string;
+            /** @enum {string} */
+            zone?: "INSIDE_TOWN" | "OUT_OF_TOWN";
+            stops: components["schemas"]["QuoteStopDto"][];
+        };
         AssignVehicleDto: {
             /** Format: uuid */
             vehicleId: string;
@@ -1383,6 +1557,7 @@ export interface components {
             vehicleTypeId: string;
             /** @enum {string} */
             zone: "INSIDE_TOWN" | "OUT_OF_TOWN";
+            quoteToken: string;
             vanOnly?: boolean;
             ladyDriverOnly?: boolean;
             scheduledAt?: string;
@@ -2388,6 +2563,27 @@ export interface operations {
             };
         };
     };
+    BookingCandidatesController_candidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>[];
+                };
+            };
+        };
+    };
     BookingsController_findAll: {
         parameters: {
             query?: {
@@ -2397,10 +2593,13 @@ export interface operations {
                 paymentStatus?: "UNPAID" | "PAID" | "PARTIALLY_REFUNDED" | "REFUNDED";
                 paymentMethod?: "CARD" | "CASH" | "WALLET" | "ACCOUNT";
                 driverId?: string;
+                q?: string;
+                phone?: string;
+                trackingId?: string;
                 zone?: "INSIDE_TOWN" | "OUT_OF_TOWN";
                 from?: string;
                 to?: string;
-                tab?: "unassigned" | "assigned" | "active" | "closed";
+                tab?: "unassigned" | "assigned" | "active" | "closed" | "timeout";
             };
             header?: never;
             path?: never;
@@ -2421,7 +2620,9 @@ export interface operations {
     BookingsController_create: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -2456,9 +2657,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2477,9 +2676,49 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
+                content?: never;
+            };
+        };
+    };
+    BookingsController_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBookingDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
                 };
+                content?: never;
+            };
+        };
+    };
+    BookingsController_retrySearch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2502,9 +2741,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2527,9 +2764,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2552,9 +2787,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2577,9 +2810,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2602,9 +2833,7 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content: {
-                    "application/json": Record<string, never>;
-                };
+                content?: never;
             };
         };
     };
@@ -2689,6 +2918,29 @@ export interface operations {
                 content: {
                     "application/json": Record<string, never>;
                 };
+            };
+        };
+    };
+    DriverBookingController_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseBookingDto"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2824,6 +3076,29 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    FaresController_quotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteBatchDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
             };
         };
     };
@@ -3128,6 +3403,29 @@ export interface operations {
             };
         };
     };
+    PassengerFaresController_quotes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuoteBatchDto"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
     PassengerBookingsController_create: {
         parameters: {
             query?: never;
@@ -3234,6 +3532,92 @@ export interface operations {
             path: {
                 id: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    PlacesController_autocomplete: {
+        parameters: {
+            query: {
+                q: string;
+                session: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>[];
+                };
+            };
+        };
+    };
+    PlacesController_reverse: {
+        parameters: {
+            query: {
+                lat: number;
+                lng: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    PlacesController_details: {
+        parameters: {
+            query: {
+                session: string;
+            };
+            header?: never;
+            path: {
+                placeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    DispatchConfigController_dispatch: {
+        parameters: {
+            query?: {
+                branchId?: string;
+            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

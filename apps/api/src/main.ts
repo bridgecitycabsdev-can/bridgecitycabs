@@ -1,10 +1,11 @@
-import { RequestMethod, ValidationPipe } from '@nestjs/common';
+import { RequestMethod } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module.js';
 import { assertOtpDevCode } from './config/otp-env.js';
+import { apiValidationPipe } from './common/validation-pipe.js';
 import { allowedWsOrigins } from './realtime/allowed-origins.js';
 import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
 import { REDIS, REDIS_SUBSCRIBER } from './redis/redis.constants.js';
@@ -34,13 +35,7 @@ async function bootstrap() {
       { path: 'admin/queues/{*path}', method: RequestMethod.ALL },
     ],
   });
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    }),
-  );
+  app.useGlobalPipes(apiValidationPipe());
   if (process.env.NODE_ENV !== 'production') {
     const doc = SwaggerModule.createDocument(
       app,

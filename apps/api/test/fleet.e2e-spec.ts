@@ -1,6 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -12,6 +10,7 @@ import { AppModule } from '../src/app.module.js';
 import { grantLocationConsent } from './location-consent.js';
 import { FleetStateService } from '../src/fleet/fleet-state.service.js';
 import { REDIS } from '../src/redis/redis.constants.js';
+import { loadEnvFile } from './load-env-file.js';
 import {
   DRIVER_HASH_FIELDS,
   driverKey,
@@ -355,22 +354,3 @@ describe('fleet rest (e2e)', () => {
   }
 });
 
-function loadEnvFile() {
-  const contents = readFileSync(resolve(process.cwd(), '.env'), 'utf8');
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const separator = line.indexOf('=');
-    if (separator === -1) continue;
-    const key = line.slice(0, separator).trim();
-    if (process.env[key] !== undefined) continue;
-    let value = line.slice(separator + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    process.env[key] = value;
-  }
-}

@@ -8,9 +8,8 @@ import {
   Req,
   Res,
   UnauthorizedException,
-  UseGuards,
 } from '@nestjs/common';
-import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from '../common/auth-user.js';
@@ -34,8 +33,8 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  // Relies on APP_GUARD ThrottlerGuard — do not also @UseGuards(ThrottlerGuard) (double-count).
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @UseGuards(ThrottlerGuard)
   async login(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,

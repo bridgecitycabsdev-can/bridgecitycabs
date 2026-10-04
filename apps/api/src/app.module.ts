@@ -2,7 +2,8 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { LoggerModule } from 'nestjs-pino';
 import { REDIS } from './redis/redis.constants.js';
 import { RedisModule } from './redis/redis.module.js';
 import { RedisThrottlerStorage } from './redis/redis-throttler.storage.js';
@@ -15,6 +16,7 @@ import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { JwtAuthGuard } from './common/jwt-auth.guard.js';
 import { RejectTokenQueryMiddleware } from './common/reject-token-query.middleware.js';
 import { RolesGuard } from './common/roles.guard.js';
+import { pinoLoggerParams } from './observability/logger.config.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { BranchesModule } from './branches/branches.module.js';
 import { UsersModule } from './users/users.module.js';
@@ -55,12 +57,19 @@ const devBoardEnabled =
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    LoggerModule.forRoot(pinoLoggerParams()),
     RedisModule,
     ThrottlerModule.forRootAsync({
       imports: [RedisModule],
       inject: [REDIS],
       useFactory: (redis: Redis) => ({
-        throttlers: [{ ttl: 60_000, limit: 100 }],
+        throttlers: [
+          {
+            ttl: 60_000,
+            // Raise THROTTLE_LIMIT for local k6 runs (Day 14 load test); keep 100 in prod.
+            limit: Number(process.env.THROTTLE_LIMIT ?? 100) || 100,
+          },
+        ],
         storage: new RedisThrottlerStorage(redis),
       }),
     }),
@@ -107,6 +116,8 @@ const devBoardEnabled =
     { provide: APP_FILTER, useClass: ApiExceptionFilter },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    // Redis-backed default: 100 req / 60s per tracker (IP, or user via UserThrottlerGuard).
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule implements NestModule {

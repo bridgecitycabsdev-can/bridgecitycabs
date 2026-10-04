@@ -1,0 +1,5 @@
+# BridgeCabs — gitleaks config (full-history scans in CI / local verify).
+title = "bridgecabs"
+
+[extend]
+useDefault = true

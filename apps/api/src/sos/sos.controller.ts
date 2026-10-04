@@ -9,6 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
@@ -22,7 +23,9 @@ import { SosService } from './sos.service.js';
 export class SosController {
   constructor(private readonly sos: SosService) {}
 
+  /** No rate limit — panic taps must not 429; SOS_DEDUPE_WINDOW_SECONDS collapses duplicates. */
   @Post('driver/sos')
+  @SkipThrottle()
   @HttpCode(HttpStatus.CREATED)
   @Roles('driver')
   driverTrigger(@CurrentUser() user: AuthUser, @Body() dto: TriggerSosDto) {
@@ -30,6 +33,7 @@ export class SosController {
   }
 
   @Post('passenger/sos')
+  @SkipThrottle()
   @HttpCode(HttpStatus.CREATED)
   @Roles('passenger')
   passengerTrigger(@CurrentUser() user: AuthUser, @Body() dto: TriggerSosDto) {

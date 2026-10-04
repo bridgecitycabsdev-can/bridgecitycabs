@@ -336,7 +336,11 @@ describe('dispatch queue ids', () => {
     expect(add).toHaveBeenNthCalledWith(
       1,
       JOB_NAMES.dispatchAttempt,
-      { bookingId: 'b1', n: 4 },
+      expect.objectContaining({
+        bookingId: 'b1',
+        n: 4,
+        correlationId: expect.any(String),
+      }),
       expect.objectContaining({
         jobId: 'dispatch:b1:4',
         delay: 5_000,
@@ -373,7 +377,16 @@ describe('JobsWorker dispatch jobs', () => {
       { flush: vi.fn() } as never,
       { purgeExpired: vi.fn() } as never,
       { purge: vi.fn() } as never,
+      { sweep: vi.fn() } as never,
+      { check: vi.fn() } as never,
+      { run: vi.fn() } as never,
+      { closePreviousWeekForTimezone: vi.fn() } as never,
+      { rollupYesterdayForTimezone: vi.fn() } as never,
+      { processBookingReportJob: vi.fn() } as never,
+      { sweepOverdue: vi.fn() } as never,
+      { runNightlyBackup: vi.fn() } as never,
       dispatch as never,
+      { processEvent: vi.fn() } as never,
     );
 
     await worker.process({ name: JOB_NAMES.dispatchAttempt, data: { bookingId: 'b1', n: 2 } } as Job);

@@ -1383,7 +1383,6 @@ export class BookingsService {
                 entity: 'booking',
                 entityId: created.id,
                 action: 'booking.credit_limit_override',
-                before: null,
                 after: {
                   corporateAccountId: input.accountBooking.corporateAccountId,
                   currentCents: override.currentCents,

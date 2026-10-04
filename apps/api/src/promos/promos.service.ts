@@ -9,6 +9,11 @@ import type { Prisma } from '@prisma/client';
 import { ApiCode } from '../common/api-code.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { branchIdForCreate, branchWhere } from '../common/branch-scope.js';
+import {
+  normalizePage,
+  paginate,
+  type PageQuery,
+} from '../common/pagination.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { applyPromo } from './apply-promo.js';
 import type { CreatePromoCodeDto } from './dto/create-promo-code.dto.js';
@@ -59,20 +64,34 @@ export class PromosService {
     return this.present(row);
   }
 
-  async list(user: AuthUser) {
+  async list(
+    user: AuthUser,
+    query: Partial<Pick<PageQuery, 'page' | 'pageSize'>> = {},
+  ) {
     this.assertWrite(user);
     const scope = branchWhere(user);
-    const rows = await this.prisma.promoCode.findMany({
-      where: {
-        ...(scope.branchId
-          ? {
-              OR: [{ branchId: scope.branchId }, { branchId: null }],
-            }
-          : {}),
-      },
-      orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
-    });
-    return rows.map((row) => this.present(row));
+    const { page, pageSize, skip, take } = normalizePage(query);
+    const where = {
+      ...(scope.branchId
+        ? {
+            OR: [{ branchId: scope.branchId }, { branchId: null }],
+          }
+        : {}),
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.promoCode.count({ where }),
+      this.prisma.promoCode.findMany({
+        where,
+        orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take,
+      }),
+    ]);
+    return paginate(
+      rows.map((row) => this.present(row)),
+      total,
+      { page, pageSize },
+    );
   }
 
   async update(user: AuthUser, id: string, dto: UpdatePromoCodeDto) {

@@ -12,6 +12,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Prisma } from '@prisma/client';
 import { ApiCode } from '../common/api-code.js';
 import type { AuthUser } from '../common/auth-user.js';
+import { normalizePage, paginate } from '../common/pagination.js';
 import {
   accountsReceivableKey,
   bankClearingKey,
@@ -182,42 +183,53 @@ export class InvoiceService {
       throw new ForbiddenException();
     }
 
-    const rows = await this.prisma.invoice.findMany({
-      where: {
-        ...(scopeBranchId ? { branchId: scopeBranchId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-        ...(query.corporateAccountId
-          ? { corporateAccountId: query.corporateAccountId }
-          : {}),
-        ...(query.groupId ? { groupId: query.groupId } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        _count: { select: { lines: true } },
-        corporateAccount: { select: { id: true, name: true } },
-        group: { select: { id: true, name: true } },
-      },
-    });
-    return rows.map((row) => ({
-      id: row.id,
-      number: row.number,
-      branchId: row.branchId,
-      corporateAccountId: row.corporateAccountId,
-      corporateAccount: row.corporateAccount,
-      groupId: row.groupId,
-      group: row.group,
-      periodStart: row.periodStart.toISOString(),
-      periodEnd: row.periodEnd.toISOString(),
-      subtotalCents: row.subtotalCents,
-      taxCents: row.taxCents,
-      totalCents: row.totalCents,
-      paidCents: row.paidCents,
-      status: row.status,
-      dueAt: row.dueAt?.toISOString() ?? null,
-      generatedById: row.generatedById,
-      createdAt: row.createdAt.toISOString(),
-      lineCount: row._count.lines,
-    }));
+    const { page, pageSize, skip, take } = normalizePage(query);
+    const where = {
+      ...(scopeBranchId ? { branchId: scopeBranchId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.corporateAccountId
+        ? { corporateAccountId: query.corporateAccountId }
+        : {}),
+      ...(query.groupId ? { groupId: query.groupId } : {}),
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.invoice.count({ where }),
+      this.prisma.invoice.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        include: {
+          _count: { select: { lines: true } },
+          corporateAccount: { select: { id: true, name: true } },
+          group: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+    return paginate(
+      rows.map((row) => ({
+        id: row.id,
+        number: row.number,
+        branchId: row.branchId,
+        corporateAccountId: row.corporateAccountId,
+        corporateAccount: row.corporateAccount,
+        groupId: row.groupId,
+        group: row.group,
+        periodStart: row.periodStart.toISOString(),
+        periodEnd: row.periodEnd.toISOString(),
+        subtotalCents: row.subtotalCents,
+        taxCents: row.taxCents,
+        totalCents: row.totalCents,
+        paidCents: row.paidCents,
+        status: row.status,
+        dueAt: row.dueAt?.toISOString() ?? null,
+        generatedById: row.generatedById,
+        createdAt: row.createdAt.toISOString(),
+        lineCount: row._count.lines,
+      })),
+      total,
+      { page, pageSize },
+    );
   }
 
   async get(user: AuthUser, id: string) {

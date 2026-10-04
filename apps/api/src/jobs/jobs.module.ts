@@ -1,10 +1,13 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { FleetModule } from '../fleet/fleet.module.js';
 import { IdempotencyModule } from '../idempotency/idempotency.module.js';
 import { DispatchModule } from '../dispatch/dispatch.module.js';
 import { FinanceModule } from '../finance/finance.module.js';
 import { LeaseModule } from '../lease/lease.module.js';
 import { ReportingModule } from '../reporting/reporting.module.js';
+import { StorageModule } from '../storage/storage.module.js';
+import { WebhooksModule } from '../webhooks/webhooks.module.js';
+import { DatabaseBackupService } from './database-backup.service.js';
 import { QueueModule } from './queue.module.js';
 import { JobsScheduler } from './jobs.scheduler.js';
 import { JobsWorker } from './jobs.worker.js';
@@ -24,7 +27,10 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     LeaseModule,
     FinanceModule,
     ReportingModule,
-    ...(workersEnabled ? [DispatchModule] : []),
+    StorageModule,
+    ...(workersEnabled
+      ? [DispatchModule, forwardRef(() => WebhooksModule)]
+      : []),
   ],
   providers: [
     PresenceSweepService,
@@ -32,6 +38,7 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     LocationRetentionService,
     PaymentPendingAlertService,
     LedgerIntegrityService,
+    DatabaseBackupService,
     ...(workersEnabled ? [JobsScheduler, JobsWorker] : []),
   ],
   exports: [
@@ -40,6 +47,7 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     LocationRetentionService,
     PaymentPendingAlertService,
     LedgerIntegrityService,
+    DatabaseBackupService,
   ],
 })
 export class JobsModule {}

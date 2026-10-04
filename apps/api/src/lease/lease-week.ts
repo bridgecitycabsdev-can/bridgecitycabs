@@ -29,7 +29,7 @@ export function leaseDeductionCronPattern(dayEnv?: string | null): string {
 
 /** Cron for local midnight the day after LEASE_DEDUCTION_DAY (weekly close). */
 export function weeklyCloseCronPattern(dayEnv?: string | null): string {
-  const key = normalizeWeekday(dayEnv, 'MON');
+  const key = normalizeWeekday(dayEnv, 'MON') as (typeof WEEKDAYS)[number];
   const idx = WEEKDAYS.indexOf(key);
   const next = WEEKDAYS[(idx + 1) % WEEKDAYS.length]!;
   return leaseDeductionCronPattern(next);

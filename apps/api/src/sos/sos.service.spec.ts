@@ -32,13 +32,22 @@ describe('SosService', () => {
       booking: {
         findUnique: vi.fn(async () => ({ id: 'b1', branchId: 'branch-1' })),
       },
-      sosAlert: { create: vi.fn(async ({ data }) => ({ id: 'sos-1', ...data, ...alertRow, ...data })) },
+      sosAlert: {
+        findFirst: vi.fn(async () => null),
+        create: vi.fn(async ({ data }) => ({ id: 'sos-1', ...data, ...alertRow, ...data })),
+      },
     };
     const events = { emit: vi.fn() };
     const sms = { sendTransactional: vi.fn(async () => undefined) };
     const service = new SosService(
       prisma as never,
-      { get: (k: string) => (k === 'SOS_BRANCH_FALLBACK_PHONE' ? '+14035550999' : undefined) } as never,
+      {
+        get: (k: string) => {
+          if (k === 'SOS_BRANCH_FALLBACK_PHONE') return '+14035550999';
+          if (k === 'SOS_DEDUPE_WINDOW_SECONDS') return '30';
+          return undefined;
+        },
+      } as never,
       events as never,
       { notify: vi.fn() } as never,
       sms as never,
@@ -63,6 +72,43 @@ describe('SosService', () => {
       '+14035550999',
       expect.stringContaining('sos-1'),
     );
+  });
+
+  it('dedupes a second trigger within the window by updating lat/lng only', async () => {
+    const prisma = {
+      sosAlert: {
+        findFirst: vi.fn(async () => alertRow),
+        update: vi.fn(async ({ data }) => ({ ...alertRow, ...data })),
+        create: vi.fn(),
+      },
+    };
+    const events = { emit: vi.fn() };
+    const sms = { sendTransactional: vi.fn() };
+    const service = new SosService(
+      prisma as never,
+      { get: (k: string) => (k === 'SOS_DEDUPE_WINDOW_SECONDS' ? '30' : undefined) } as never,
+      events as never,
+      { notify: vi.fn() } as never,
+      sms as never,
+    );
+
+    await expect(
+      service.trigger({
+        branchId: 'branch-1',
+        triggeredByType: 'DRIVER',
+        triggeredByUserId: 'driver-user',
+        lat: 49.71,
+        lng: -112.81,
+      }),
+    ).resolves.toMatchObject({ id: 'sos-1', lat: 49.71, lng: -112.81 });
+
+    expect(prisma.sosAlert.update).toHaveBeenCalledWith({
+      where: { id: 'sos-1' },
+      data: { lat: 49.71, lng: -112.81 },
+    });
+    expect(prisma.sosAlert.create).not.toHaveBeenCalled();
+    expect(events.emit).not.toHaveBeenCalled();
+    expect(sms.sendTransactional).not.toHaveBeenCalled();
   });
 
   it('acknowledges then notifies — never before ACKNOWLEDGED is saved', async () => {

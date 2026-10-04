@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import type { Queue } from 'bullmq';
+import { withCorrelationId } from '../observability/correlation.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 
 export const REPORT_QUEUE = Symbol('REPORT_QUEUE');
@@ -22,7 +23,7 @@ export class BullReportQueue implements ReportQueue {
 
   enqueueBookingReport(job: BuildBookingReportJob) {
     return this.queue
-      .add(JOB_NAMES.buildBookingReport, job, {
+      .add(JOB_NAMES.buildBookingReport, withCorrelationId({ ...job }), {
         jobId: `booking-report:${job.reportId}`,
         removeOnComplete: 50,
         removeOnFail: 20,

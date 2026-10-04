@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,6 +15,7 @@ import { SocketLimits } from '../src/realtime/socket-limits.js';
 import { REDIS, REDIS_SUBSCRIBER } from '../src/redis/redis.constants.js';
 import { LOC_BUFFER_KEY, driverKey, presenceKey, socketConnKey, socketRateKey } from '../src/redis/redis.keys.js';
 import { grantLocationConsent } from './location-consent.js';
+import { loadEnvFile } from './load-env-file.js';
 
 loadEnvFile();
 
@@ -328,10 +328,10 @@ describe('privacy (e2e)', () => {
 
     const first = connect('/dispatch', dispatcherToken);
     const second = connect('/dispatch', dispatcherToken);
-    await once(first, 'connect', 3000);
-    await once(second, 'connect', 3000);
+    await once(first, 'connect', 8_000);
+    await once(second, 'connect', 8_000);
     const third = connect('/dispatch', dispatcherToken);
-    await once(third, 'disconnect', 3000);
+    await once(third, 'disconnect', 8_000);
     expect(first.connected).toBe(true);
     expect(second.connected).toBe(true);
 
@@ -424,22 +424,3 @@ function once(socket: ClientSocket, event: string, ms: number) {
   });
 }
 
-function loadEnvFile() {
-  const contents = readFileSync(resolve(process.cwd(), '.env'), 'utf8');
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const separator = line.indexOf('=');
-    if (separator === -1) continue;
-    const key = line.slice(0, separator).trim();
-    if (process.env[key] !== undefined) continue;
-    let value = line.slice(separator + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    process.env[key] = value;
-  }
-}

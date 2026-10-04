@@ -2,6 +2,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Queue } from 'bullmq';
+import { withCorrelationId } from '../observability/correlation.js';
 import { DISPATCH_RETRY_MS, JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 
 export const DISPATCH_QUEUE = Symbol('DISPATCH_QUEUE');
@@ -29,12 +30,17 @@ export class BullDispatchQueue implements DispatchQueue {
   ) {}
 
   enqueueAttempt(bookingId: string, n: number, delayMs = 0) {
-    return addOnce(this.queue, JOB_NAMES.dispatchAttempt, { bookingId, n }, {
-      jobId: dispatchAttemptJobId(bookingId, n),
-      delay: Math.max(0, Math.floor(delayMs)),
-      removeOnComplete: true,
-      removeOnFail: 20,
-    });
+    return addOnce(
+      this.queue,
+      JOB_NAMES.dispatchAttempt,
+      withCorrelationId({ bookingId, n }),
+      {
+        jobId: dispatchAttemptJobId(bookingId, n),
+        delay: Math.max(0, Math.floor(delayMs)),
+        removeOnComplete: true,
+        removeOnFail: 20,
+      },
+    );
   }
 
   async removeAttempts(bookingId: string) {
@@ -54,12 +60,17 @@ export class BullDispatchQueue implements DispatchQueue {
   scheduleRelease(bookingId: string, scheduledAt: Date) {
     const leadMs = leadMinutes(this.config) * 60_000;
     const delay = Math.max(0, scheduledAt.getTime() - leadMs - Date.now());
-    return addOnce(this.queue, JOB_NAMES.scheduledRelease, { bookingId }, {
-      jobId: scheduledReleaseJobId(bookingId),
-      delay,
-      removeOnComplete: true,
-      removeOnFail: 20,
-    });
+    return addOnce(
+      this.queue,
+      JOB_NAMES.scheduledRelease,
+      withCorrelationId({ bookingId }),
+      {
+        jobId: scheduledReleaseJobId(bookingId),
+        delay,
+        removeOnComplete: true,
+        removeOnFail: 20,
+      },
+    );
   }
 }
 

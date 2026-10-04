@@ -49,7 +49,7 @@ export function accountPostings(i: {
   commission: number;
   driverEarning: number;
 }): Array<{ acct: string; type: TripPostingAccount; amt: number }> {
-  return [
+  const lines: Array<{ acct: string; type: TripPostingAccount; amt: number }> = [
     {
       acct: `ACCOUNTS_RECEIVABLE:${i.corporateAccountId}`,
       type: 'ACCOUNTS_RECEIVABLE',
@@ -58,7 +58,8 @@ export function accountPostings(i: {
     { acct: 'DRIVER_BALANCE', type: 'DRIVER_BALANCE', amt: -i.driverEarning },
     { acct: 'COMPANY_REVENUE', type: 'COMPANY_REVENUE', amt: -i.commission },
     { acct: 'GST_PAYABLE', type: 'GST_PAYABLE', amt: -i.tax },
-  ].filter((l) => l.amt !== 0);
+  ];
+  return lines.filter((l) => l.amt !== 0);
 }
 
 /** Driver ledger balance: positive = company owes driver; negative = driver owes company. */

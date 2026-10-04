@@ -1,7 +1,8 @@
 import { PayoutStatus } from '@prisma/client';
 import { IsEnum, IsOptional, IsUUID } from 'class-validator';
+import { PageQuery } from '../../common/pagination.js';
 
-export class PayoutQuery {
+export class PayoutQuery extends PageQuery {
   @IsOptional()
   @IsEnum(PayoutStatus)
   status?: PayoutStatus;

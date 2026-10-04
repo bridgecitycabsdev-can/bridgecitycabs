@@ -8,6 +8,7 @@ describe('StripeWebhookService', () => {
   let prisma: {
     webhookEvent: {
       upsert: ReturnType<typeof vi.fn>;
+      findUnique: ReturnType<typeof vi.fn>;
       update: ReturnType<typeof vi.fn>;
     };
     stripeCustomer: { findUnique: ReturnType<typeof vi.fn> };
@@ -50,6 +51,17 @@ describe('StripeWebhookService', () => {
           processedAt: null,
           ...create,
         })),
+        findUnique: vi.fn(async () => {
+          const event = constructEvent.mock.results.at(-1)?.value;
+          if (!event) return null;
+          return {
+            id: 'we-1',
+            processedAt: null,
+            eventId: event.id,
+            type: event.type,
+            payload: event,
+          };
+        }),
         update: vi.fn(async () => ({ id: 'we-1' })),
       },
       stripeCustomer: {
@@ -106,6 +118,11 @@ describe('StripeWebhookService', () => {
         .mockResolvedValueOnce({ bookingId: 'b1', to: 'CLOSED' }),
     };
     events = { emitAsync: vi.fn(async () => []) };
+    const queue = {
+      enqueue: vi.fn(async (job: { eventId: string }) => {
+        await service.processEvent(job.eventId);
+      }),
+    };
     service = new StripeWebhookService(
       prisma as never,
       { get: (key: string) => (key === 'STRIPE_WEBHOOK_SECRET' ? secret : undefined) } as never,
@@ -113,6 +130,7 @@ describe('StripeWebhookService', () => {
       state as never,
       events as never,
       stripe as never,
+      queue as never,
     );
   });
 

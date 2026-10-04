@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { AuthUser } from '../common/auth-user.js';
 import { branchWhere } from '../common/branch-scope.js';
+import { normalizePage, paginate } from '../common/pagination.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateLeaseAgreementDto } from './dto/create-lease-agreement.dto.js';
 import type { LeaseAgreementQuery } from './dto/lease-agreement-query.dto.js';
@@ -66,17 +67,28 @@ export class LeaseAgreementsService {
   async findAll(user: AuthUser, query: LeaseAgreementQuery) {
     this.assertAdmin(user);
     const scope = branchWhere(user, query.branchId);
-    const rows = await this.prisma.leaseAgreement.findMany({
-      where: {
-        ...(query.driverId ? { driverId: query.driverId } : {}),
-        ...(query.vehicleId ? { vehicleId: query.vehicleId } : {}),
-        ...(query.active === undefined ? {} : { active: query.active }),
-        driver: { ...scope },
-      },
-      include: leaseInclude,
-      orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
-    });
-    return rows.map((row) => this.present(row));
+    const { page, pageSize, skip, take } = normalizePage(query);
+    const where = {
+      ...(query.driverId ? { driverId: query.driverId } : {}),
+      ...(query.vehicleId ? { vehicleId: query.vehicleId } : {}),
+      ...(query.active === undefined ? {} : { active: query.active }),
+      driver: { ...scope },
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.leaseAgreement.count({ where }),
+      this.prisma.leaseAgreement.findMany({
+        where,
+        include: leaseInclude,
+        orderBy: [{ active: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take,
+      }),
+    ]);
+    return paginate(
+      rows.map((row) => this.present(row)),
+      total,
+      { page, pageSize },
+    );
   }
 
   async findOne(id: string, user: AuthUser) {

@@ -9,4 +9,14 @@ describe('websocket origins', () => {
     ]);
     expect(allowedWsOrigins(undefined)).toEqual([]);
   });
+
+  it('rejects bare and embedded wildcards', () => {
+    expect(() => allowedWsOrigins('*')).toThrow(/wildcards/);
+    expect(() => allowedWsOrigins('https://*.bridgecitycabs.com')).toThrow(
+      /wildcards/,
+    );
+    expect(() =>
+      allowedWsOrigins('http://localhost:5173, *'),
+    ).toThrow(/wildcards/);
+  });
 });

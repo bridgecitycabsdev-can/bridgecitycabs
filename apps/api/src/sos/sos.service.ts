@@ -55,6 +55,28 @@ export class SosService {
       }
     }
 
+    const windowSec = Number(
+      this.config.get<string>('SOS_DEDUPE_WINDOW_SECONDS') ?? '30',
+    );
+    if (Number.isFinite(windowSec) && windowSec > 0) {
+      const since = new Date(Date.now() - windowSec * 1000);
+      const open = await this.prisma.sosAlert.findFirst({
+        where: {
+          triggeredByUserId: i.triggeredByUserId,
+          status: { notIn: TERMINAL },
+          createdAt: { gte: since },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (open) {
+        const updated = await this.prisma.sosAlert.update({
+          where: { id: open.id },
+          data: { lat: i.lat, lng: i.lng },
+        });
+        return this.present(updated);
+      }
+    }
+
     const alert = await this.prisma.sosAlert.create({ data: i });
     this.events.emit(SOS_TRIGGERED, alert);
 

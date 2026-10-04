@@ -1,5 +1,7 @@
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
@@ -46,5 +48,31 @@ export class R2ObjectStorage implements ObjectStorage {
       new GetObjectCommand({ Bucket: this.bucket, Key: key }),
       { expiresIn: Math.max(60, Math.floor(ttlSeconds)) },
     );
+  }
+
+  async listObjectKeys(prefix: string) {
+    const keys: string[] = [];
+    let token: string | undefined;
+    do {
+      const page = await this.client.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucket,
+          Prefix: prefix,
+          ContinuationToken: token,
+        }),
+      );
+      for (const obj of page.Contents ?? []) {
+        if (obj.Key) keys.push(obj.Key);
+      }
+      token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    return keys;
+  }
+
+  async deleteObject(key: string) {
+    await this.client.send(
+      new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+    this.logger.debug(`Deleted s3://${this.bucket}/${key}`);
   }
 }

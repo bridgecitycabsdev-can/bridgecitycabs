@@ -1,7 +1,8 @@
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsOptional, IsUUID } from 'class-validator';
+import { PageQuery } from '../../common/pagination.js';
 
-export class LeaseAgreementQuery {
+export class LeaseAgreementQuery extends PageQuery {
   @IsOptional()
   @IsUUID()
   branchId?: string;

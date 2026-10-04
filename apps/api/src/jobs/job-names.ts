@@ -12,8 +12,10 @@ export const JOB_NAMES = {
   dailyStatsRollup: 'daily-stats-rollup',
   buildBookingReport: 'build-booking-report',
   invoiceOverdue: 'invoice-overdue',
+  nightlyDbBackup: 'nightly-db-backup',
   offerExpire: 'offer-expire',
   dispatchAttempt: 'dispatch-attempt',
+  stripeWebhook: 'stripe-webhook',
   scheduledRelease: 'scheduled-release',
   scheduledSweep: 'scheduled-sweep',
 } as const;
@@ -33,3 +35,5 @@ export const PAYMENT_PENDING_ALERT_PATTERN = '0 6 * * *';
 export const LEDGER_INTEGRITY_PATTERN = '15 6 * * *';
 /** 06:30 UTC — flip past-due SENT/PARTIALLY_PAID invoices to OVERDUE. */
 export const INVOICE_OVERDUE_PATTERN = '30 6 * * *';
+/** 03:00 UTC — independent pg_dump → R2 (migrator URL; not the app role). */
+export const NIGHTLY_DB_BACKUP_PATTERN = '0 3 * * *';

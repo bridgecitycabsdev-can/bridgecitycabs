@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaClient } from '@prisma/client';
@@ -12,6 +10,7 @@ import { LocationFlushService } from '../src/jobs/location-flush.service.js';
 import { LocationRetentionService } from '../src/jobs/location-retention.service.js';
 import { PresenceSweepService } from '../src/jobs/presence-sweep.service.js';
 import { REDIS } from '../src/redis/redis.constants.js';
+import { loadEnvFile } from './load-env-file.js';
 import {
   DRIVER_HASH_FIELDS,
   LOC_BUFFER_KEY,
@@ -319,22 +318,3 @@ describe('background jobs (e2e)', () => {
   }
 });
 
-function loadEnvFile() {
-  const contents = readFileSync(resolve(process.cwd(), '.env'), 'utf8');
-  for (const rawLine of contents.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const separator = line.indexOf('=');
-    if (separator === -1) continue;
-    const key = line.slice(0, separator).trim();
-    if (process.env[key] !== undefined) continue;
-    let value = line.slice(separator + 1).trim();
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1);
-    }
-    process.env[key] = value;
-  }
-}

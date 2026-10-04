@@ -251,20 +251,31 @@ export class FinanceService {
       throw new ForbiddenException();
     }
 
-    const rows = await this.prisma.driverPayout.findMany({
-      where: {
-        ...(scopeBranchId ? { branchId: scopeBranchId } : {}),
-        ...(query.status ? { status: query.status } : {}),
-        ...(query.driverId ? { driverId: query.driverId } : {}),
-      },
-      orderBy: { requestedAt: 'desc' },
-      include: {
-        driver: {
-          select: { id: true, firstName: true, lastName: true },
+    const { page, pageSize, skip, take } = normalizePage(query);
+    const where = {
+      ...(scopeBranchId ? { branchId: scopeBranchId } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.driverId ? { driverId: query.driverId } : {}),
+    };
+    const [total, rows] = await this.prisma.$transaction([
+      this.prisma.driverPayout.count({ where }),
+      this.prisma.driverPayout.findMany({
+        where,
+        orderBy: { requestedAt: 'desc' },
+        skip,
+        take,
+        include: {
+          driver: {
+            select: { id: true, firstName: true, lastName: true },
+          },
         },
-      },
-    });
-    return rows.map((row) => this.presentPayout(row));
+      }),
+    ]);
+    return paginate(
+      rows.map((row) => this.presentPayout(row)),
+      total,
+      { page, pageSize },
+    );
   }
 
   async markPayoutSent(

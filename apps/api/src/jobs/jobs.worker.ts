@@ -6,8 +6,14 @@ import { DispatchJobsService } from '../dispatch/dispatch-jobs.service.js';
 import { InvoiceService } from '../finance/invoice.service.js';
 import { WeeklyClosingService } from '../finance/weekly-closing.service.js';
 import { LeaseDeductionService } from '../lease/lease-deduction.service.js';
+import {
+  readJobCorrelationId,
+  runWithCorrelationIdAsync,
+} from '../observability/correlation.js';
+import { StripeWebhookService } from '../payments/stripe-webhook.service.js';
 import { BookingReportService } from '../reporting/booking-report.service.js';
 import { DailyStatsService } from '../reporting/daily-stats.service.js';
+import { DatabaseBackupService } from './database-backup.service.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 import { LocationFlushService } from './location-flush.service.js';
 import { LocationRetentionService } from './location-retention.service.js';
@@ -31,12 +37,27 @@ export class JobsWorker extends WorkerHost {
     private readonly dailyStats: DailyStatsService,
     private readonly bookingReports: BookingReportService,
     private readonly invoices: InvoiceService,
+    private readonly dbBackup: DatabaseBackupService,
     private readonly dispatch: DispatchJobsService,
+    private readonly stripeWebhooks: StripeWebhookService,
   ) {
     super();
   }
 
   async process(job: Job) {
+    const correlationId = readJobCorrelationId(job.data);
+    return runWithCorrelationIdAsync(correlationId, () =>
+      this.runJob(job, correlationId),
+    );
+  }
+
+  private async runJob(job: Job, correlationId: string) {
+    this.logger.log({
+      msg: `job start ${job.name}`,
+      correlationId,
+      jobId: job.id,
+    });
+
     switch (job.name) {
       case JOB_NAMES.presenceSweep:
         await this.presence.sweep();
@@ -58,9 +79,7 @@ export class JobsWorker extends WorkerHost {
         return;
       case JOB_NAMES.leaseDeduction: {
         const timezone = jobTimezone(job);
-        await this.leaseDeduction.run(
-          timezone ? { timezone } : {},
-        );
+        await this.leaseDeduction.run(timezone ? { timezone } : {});
         return;
       }
       case JOB_NAMES.weeklyClose: {
@@ -83,7 +102,9 @@ export class JobsWorker extends WorkerHost {
         };
         if (typeof data?.reportId !== 'string' || !data.where) return;
         const format =
-          data.format === 'pdf' || data.format === 'json' || data.format === 'csv'
+          data.format === 'pdf' ||
+          data.format === 'json' ||
+          data.format === 'csv'
             ? data.format
             : 'csv';
         await this.bookingReports.processBookingReportJob({
@@ -96,6 +117,18 @@ export class JobsWorker extends WorkerHost {
       case JOB_NAMES.invoiceOverdue:
         await this.invoices.sweepOverdue();
         return;
+      case JOB_NAMES.nightlyDbBackup:
+        await this.dbBackup.runNightlyBackup();
+        return;
+      case JOB_NAMES.stripeWebhook: {
+        const eventId =
+          typeof (job.data as { eventId?: unknown })?.eventId === 'string'
+            ? (job.data as { eventId: string }).eventId
+            : '';
+        if (!eventId) return;
+        await this.stripeWebhooks.processEvent(eventId);
+        return;
+      }
       case JOB_NAMES.dispatchAttempt: {
         const data = jobData(job);
         if (!data.bookingId) return;
@@ -124,7 +157,11 @@ export class JobsWorker extends WorkerHost {
 }
 
 function jobData(job: Job) {
-  const data = job.data as { bookingId?: unknown; offerId?: unknown; n?: unknown };
+  const data = job.data as {
+    bookingId?: unknown;
+    offerId?: unknown;
+    n?: unknown;
+  };
   return {
     bookingId: typeof data?.bookingId === 'string' ? data.bookingId : '',
     offerId: typeof data?.offerId === 'string' ? data.offerId : '',

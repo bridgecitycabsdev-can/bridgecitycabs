@@ -6,6 +6,7 @@ import {
   HttpStatus,
   Logger,
 } from '@nestjs/common';
+import { Sentry } from '../observability/sentry.js';
 import { ApiCode } from './api-code.js';
 
 export type ApiErrorBody = {
@@ -13,6 +14,11 @@ export type ApiErrorBody = {
   message: string;
   fields?: Record<string, string>;
   quote?: unknown;
+  /** Present on some 422s (e.g. missing required driver documents). */
+  missing?: string[];
+  /** Present on readiness failures (`/health/ready`). */
+  db?: string;
+  redis?: string;
 };
 
 const STATUS_CODES: Record<number, string> = {
@@ -37,6 +43,10 @@ export class ApiExceptionFilter implements ExceptionFilter {
       this.logger.error(
         exception instanceof Error ? exception.stack : String(exception),
       );
+      // Global capture — handlers should not call Sentry.captureException ad hoc.
+      if (process.env.SENTRY_DSN?.trim()) {
+        Sentry.captureException(exception);
+      }
     }
 
     const response = host.switchToHttp().getResponse<{
@@ -87,7 +97,17 @@ export function toApiError(exception: unknown): {
       };
     }
     if (typeof message === 'string') {
-      return { status, body: { code: codeFor(status, message), message } };
+      const body: ApiErrorBody = {
+        code: codeFor(status, message),
+        message,
+      };
+      if (
+        Array.isArray(raw.missing) &&
+        raw.missing.every((item) => typeof item === 'string')
+      ) {
+        body.missing = raw.missing as string[];
+      }
+      return { status, body };
     }
   }
 
@@ -109,6 +129,8 @@ function apiBody(raw: unknown): ApiErrorBody | undefined {
   const fields = stringFields(raw.fields);
   if (fields) body.fields = fields;
   if ('quote' in raw) body.quote = raw.quote;
+  if (typeof raw.db === 'string') body.db = raw.db;
+  if (typeof raw.redis === 'string') body.redis = raw.redis;
   return body;
 }
 

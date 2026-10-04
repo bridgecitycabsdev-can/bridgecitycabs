@@ -405,3 +405,81 @@ pnpm --filter api exec vitest run src/day13.spec.ts
 - [ ] GET /audit-logs works and is restricted to super_admin
 - [ ] All ten tests pass (`src/day13.spec.ts`)
 - [ ] Committed as `feat(api): dashboard analytics, custom reports, pdf generation and audit log completeness`
+
+---
+
+## Day 14 — Production hardening (how to verify end to end)
+
+Design and runbooks: [`docs/production-hardening.md`](docs/production-hardening.md). Legacy surface: [`docs/legacy-route-mapping.md`](docs/legacy-route-mapping.md).
+
+### Role restriction
+
+```bash
+# Must fail for bridgecabs_app (repeat for LedgerEntry, LedgerTransaction,
+# BookingStatusHistory, SupportTicketMessage, ClosingLine; also try TRUNCATE / ALTER TABLE).
+psql -h <host> -U bridgecabs_app -d bridgecabs -c "DELETE FROM \"AuditLog\";"
+```
+
+### Backup + restore drill
+
+```bash
+# produce or download backup.sql.gz (nightly job or pg_dump), then:
+./infrastructure/restore-drill.sh backup.sql.gz
+# or manually:
+docker run -d --name restore-test -e POSTGRES_PASSWORD=test -p 5433:5432 postgis/postgis:16-3.4
+gunzip -c backup.sql.gz | PGPASSWORD=test psql -h localhost -p 5433 -U postgres
+DATABASE_URL="postgresql://postgres:test@localhost:5433/postgres" pnpm --filter api test:e2e
+docker rm -f restore-test
+```
+
+
+### Observability
+
+Trigger a deliberate 5xx locally; confirm Sentry shows the event with PII scrubbed and the same `correlationId` as a pino log line. Async jobs should carry the id through BullMQ.
+
+### Health / ready / SIGTERM
+
+```bash
+curl -s localhost:3000/api/v1/health          # 200 always while process is up
+curl -s localhost:3000/api/v1/health/ready    # 200 when DB+Redis ok
+# stop Redis container → ready must 503; start it → 200 again
+# automated: apps/api/test/app.e2e-spec.ts + graceful-shutdown.e2e-spec.ts
+```
+
+### Load test
+
+```bash
+THROTTLE_LIMIT=100000 BOOKING_THROTTLE_LIMIT=1000 pnpm --filter api start:dev
+cd apps/api && pnpm exec tsx scripts/spawn-sim-drivers.ts --count 100 --branch <branchId> --behavior accept
+API_URL=http://localhost:3000 BRANCH_ID=<branchId> VEHICLE_TYPE_ID=<sedanId> k6 run loadtest/booking-matching.js
+# then: psql … -f loadtest/check-invariants.sql   # zero rows
+```
+
+### Security / secrets / env split
+
+```bash
+pnpm audit --prod
+gitleaks detect --source . --log-opts="--all"
+# Diff staging vs production host env lists — DB, Redis, Stripe, Firebase, maps keys must all differ.
+```
+
+### Full suite + deploy
+
+```bash
+pnpm --filter api test:e2e
+git push origin main   # Actions: design-tokens + gitleaks + lint/typecheck/e2e → migrate → deploy → smoke
+```
+
+## Done when (Day 14)
+
+- [ ] `bridgecabs_app` and `bridgecabs_migrator` exist in staging and production; restricted grants verified by direct `psql`
+- [ ] A real backup was restored and e2e passed against the restored database
+- [ ] Staging and production use fully separate credentials (DB, Redis, Stripe, Firebase, maps)
+- [ ] Sentry captures errors with PII scrubbed; pino logs carry `correlationId` through async jobs
+- [ ] Rate-limit sweep complete; SOS `@SkipThrottle` + `SOS_DEDUPE_WINDOW_SECONDS` documented
+- [ ] Load test passes thresholds with zero double-assignment violations
+- [ ] CI runs the full e2e suite against ephemeral Postgres/Redis and passes
+- [ ] `/health` and `/health/ready` are distinct; graceful shutdown drains in-flight requests
+- [ ] `docs/legacy-route-mapping.md` accounts for every Day 0–style endpoint
+- [ ] Full-history gitleaks clean; Day 0 exposed credential confirmed rotated
+- [ ] Committed as `chore(infra): production hardening — db roles, backups, environments, observability, load test, ci`

@@ -15,6 +15,7 @@ import {
   LOCATION_FLUSH_EVERY_MS,
   LOCATION_RETENTION_PATTERN,
   LEDGER_INTEGRITY_PATTERN,
+  NIGHTLY_DB_BACKUP_PATTERN,
   PAYMENT_PENDING_ALERT_PATTERN,
   PRESENCE_SWEEP_EVERY_MS,
   SCHEDULED_SWEEP_EVERY_MS,
@@ -72,6 +73,11 @@ export class JobsScheduler implements OnModuleInit {
       JOB_NAMES.invoiceOverdue,
       { pattern: INVOICE_OVERDUE_PATTERN, tz: 'UTC' },
       { name: JOB_NAMES.invoiceOverdue, opts: template },
+    );
+    await this.queue.upsertJobScheduler(
+      JOB_NAMES.nightlyDbBackup,
+      { pattern: NIGHTLY_DB_BACKUP_PATTERN, tz: 'UTC' },
+      { name: JOB_NAMES.nightlyDbBackup, opts: template },
     );
     await this.queue.upsertJobScheduler(
       JOB_NAMES.scheduledSweep,

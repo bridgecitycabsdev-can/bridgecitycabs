@@ -8,10 +8,13 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
+import { UserThrottlerGuard } from '../common/user-throttler.guard.js';
 import { Idempotent } from '../idempotency/idempotency.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RateBookingDto } from '../ratings/dto/rate-booking.dto.js';
@@ -33,6 +36,13 @@ export class PassengerBookingsController {
 
   @Post()
   @Idempotent()
+  @Throttle({
+    default: {
+      limit: Number(process.env.BOOKING_THROTTLE_LIMIT ?? 10) || 10,
+      ttl: 60_000,
+    },
+  })
+  @UseGuards(UserThrottlerGuard)
   @HttpCode(HttpStatus.CREATED)
   create(@CurrentUser() user: AuthUser, @Body() dto: PassengerCreateBookingDto) {
     return this.bookings.create(dto, user);

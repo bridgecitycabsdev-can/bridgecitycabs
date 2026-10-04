@@ -10,6 +10,7 @@ import {
 import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
+import { PageQuery } from '../common/pagination.js';
 import { Roles } from '../common/roles.decorator.js';
 import { CreatePromoCodeDto } from './dto/create-promo-code.dto.js';
 import { PromoPreviewQuery } from './dto/promo-preview-query.dto.js';
@@ -28,8 +29,8 @@ export class PromosController {
   }
 
   @Get()
-  list(@CurrentUser() user: AuthUser) {
-    return this.promos.list(user);
+  list(@CurrentUser() user: AuthUser, @Query() query: PageQuery) {
+    return this.promos.list(user, query);
   }
 
   @Get(':code/preview')

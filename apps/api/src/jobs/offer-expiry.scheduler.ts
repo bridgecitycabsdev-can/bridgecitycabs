@@ -1,6 +1,7 @@
 import { InjectQueue } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import type { Queue } from 'bullmq';
+import { withCorrelationId } from '../observability/correlation.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 
 export const OFFER_EXPIRY_SCHEDULER = Symbol('OFFER_EXPIRY_SCHEDULER');
@@ -26,7 +27,11 @@ export class BullOfferExpiryScheduler implements OfferExpiryScheduler {
     try {
       await this.queue.add(
         JOB_NAMES.offerExpire,
-        { offerId: job.offerId, bookingId: job.bookingId, driverId: job.driverId },
+        withCorrelationId({
+          offerId: job.offerId,
+          bookingId: job.bookingId,
+          driverId: job.driverId,
+        }),
         {
           delay,
           jobId: job.offerId,

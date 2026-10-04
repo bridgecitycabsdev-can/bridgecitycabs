@@ -9,8 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type Stripe from 'stripe';
 import { BookingStateService } from '../bookings/booking-state.service.js';
+import {
+  STRIPE_WEBHOOK_QUEUE,
+  type StripeWebhookQueue,
+} from '../jobs/stripe-webhook-queue.js';
 import { cardTripLedgerLines } from '../ledger/card-ledger-lines.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { getCorrelationId } from '../observability/correlation.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { STRIPE } from './stripe.token.js';
 
@@ -28,6 +33,7 @@ export class StripeWebhookService {
     private readonly state: BookingStateService,
     private readonly events: EventEmitter2,
     @Inject(STRIPE) private readonly stripe: Stripe | null,
+    @Inject(STRIPE_WEBHOOK_QUEUE) private readonly webhookQueue: StripeWebhookQueue,
   ) {
     this.handlers = {
       'setup_intent.succeeded': (e) => this.onSetupIntentSucceeded(e),
@@ -39,6 +45,11 @@ export class StripeWebhookService {
     };
   }
 
+  /**
+   * Verify + persist, then enqueue BullMQ processing so the HTTP correlation id
+   * threads into the async worker. Returns 200 after enqueue (Stripe retries on
+   * failure; the job is idempotent via processedAt).
+   */
   async handle(rawBody: Buffer, signature: string | undefined) {
     const stripe = this.requireStripe();
     const secret = this.config.get<string>('STRIPE_WEBHOOK_SECRET')?.trim();
@@ -72,6 +83,27 @@ export class StripeWebhookService {
       return { received: true as const };
     }
 
+    await this.webhookQueue.enqueue({
+      eventId: event.id,
+      correlationId: getCorrelationId(),
+    });
+    return { received: true as const };
+  }
+
+  /** BullMQ worker entry — runs the type-specific handler once. */
+  async processEvent(eventId: string) {
+    const stored = await this.prisma.webhookEvent.findUnique({
+      where: {
+        provider_eventId: { provider: 'STRIPE', eventId },
+      },
+    });
+    if (!stored) {
+      this.logger.warn(`stripe-webhook job: unknown event ${eventId}`);
+      return;
+    }
+    if (stored.processedAt) return;
+
+    const event = stored.payload as unknown as Stripe.Event;
     const handler = this.handlers[event.type];
     if (handler) {
       await handler(event);
@@ -83,7 +115,6 @@ export class StripeWebhookService {
       where: { id: stored.id },
       data: { processedAt: new Date() },
     });
-    return { received: true as const };
   }
 
   private async onSetupIntentSucceeded(event: Stripe.Event) {

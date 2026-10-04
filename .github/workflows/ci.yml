@@ -3,6 +3,14 @@ name: CI
 on:
   push:
   pull_request:
+  # Production deploy is manual / tag-gated — the one deliberate human step.
+  workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: 'Deploy to production after tests pass'
+        required: false
+        default: 'false'
+        type: boolean
 
 jobs:
   design-tokens:
@@ -13,7 +21,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm tokens:build
@@ -21,3 +29,165 @@ jobs:
         run: |
           git add --intent-to-add -- packages/design-tokens/dist/tokens.css packages/bridgecabs_core/lib/theme/tokens.dart
           git diff --exit-code -- packages/design-tokens/dist/tokens.css packages/bridgecabs_core/lib/theme/tokens.dart
+
+  secrets:
+    name: gitleaks (full history)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: api
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: bridgecabs_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:test@localhost:5432/bridgecabs_test
+      REDIS_URL: redis://localhost:6379/1
+      NODE_ENV: test
+      JWT_ACCESS_SECRET: ci-jwt-secret-for-tests-only
+      JWT_REFRESH_TTL_DAYS: '7'
+      OTP_PEPPER: ci-otp-pepper-for-tests-only
+      OTP_DEV_CODE: '000000'
+      QUOTE_SECRET: ci-quote-secret-for-tests-only
+      ALLOW_FAKE_PAYMENTS: 'true'
+      THROTTLE_LIMIT: '100000'
+      BOOKING_THROTTLE_LIMIT: '100000'
+      # Optional Stripe — unit/e2e fake path works without a real key.
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_TEST_KEY }}
+      STRIPE_WEBHOOK_SECRET: whsec_ci_placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @bridgecabs/shared-types build
+      - name: Write apps/api/.env.test for dotenv-cli
+        working-directory: apps/api
+        run: |
+          cat > .env.test <<EOF
+          DATABASE_URL=${DATABASE_URL}
+          REDIS_URL=${REDIS_URL}
+          NODE_ENV=test
+          JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+          JWT_REFRESH_TTL_DAYS=${JWT_REFRESH_TTL_DAYS}
+          OTP_PEPPER=${OTP_PEPPER}
+          OTP_DEV_CODE=${OTP_DEV_CODE}
+          QUOTE_SECRET=${QUOTE_SECRET}
+          ALLOW_FAKE_PAYMENTS=${ALLOW_FAKE_PAYMENTS}
+          THROTTLE_LIMIT=${THROTTLE_LIMIT}
+          BOOKING_THROTTLE_LIMIT=${BOOKING_THROTTLE_LIMIT}
+          STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+          STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+          EOF
+      - run: pnpm --filter api lint
+      - run: pnpm --filter api typecheck
+      - run: pnpm --filter api exec prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://postgres:test@localhost:5432/bridgecabs_test
+      - run: pnpm --filter api test
+      - run: pnpm --filter api test:e2e
+        env:
+          # vitest fileParallelism is already false; keep Redis/DB isolated.
+          FORCE_COLOR: '0'
+
+  deploy-staging:
+    name: deploy staging
+    needs: [test, design-tokens, secrets]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate staging (migrator role)
+        working-directory: apps/api
+        run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_MIGRATE_DATABASE_URL }}
+      - name: Deploy staging
+        # Swap for your host's CLI/action (Railway, Render, Fly, …).
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
+            echo "RAILWAY_TOKEN not set — skip host deploy (migrate + smoke still run when configured)"
+            exit 0
+          fi
+          npm i -g @railway/cli
+          railway up --environment staging --service api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Smoke staging
+        working-directory: apps/api
+        run: pnpm exec tsx scripts/smoke-test.ts --base-url https://staging-api.bridgecitycabs.com
+        env:
+          SMOKE_EMAIL: ${{ secrets.STAGING_SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.STAGING_SMOKE_PASSWORD }}
+
+  deploy-production:
+    name: deploy production
+    needs: [test, design-tokens, secrets]
+    if: >
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deploy_production == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate production (migrator role)
+        working-directory: apps/api
+        run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: ${{ secrets.PRODUCTION_MIGRATE_DATABASE_URL }}
+      - name: Deploy production
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
+            echo "RAILWAY_TOKEN not set — configure host deploy before enabling production"
+            exit 1
+          fi
+          npm i -g @railway/cli
+          railway up --environment production --service api
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Smoke production
+        working-directory: apps/api
+        run: pnpm exec tsx scripts/smoke-test.ts --base-url https://api.bridgecitycabs.com
+        env:
+          SMOKE_EMAIL: ${{ secrets.PRODUCTION_SMOKE_EMAIL }}
+          SMOKE_PASSWORD: ${{ secrets.PRODUCTION_SMOKE_PASSWORD }}

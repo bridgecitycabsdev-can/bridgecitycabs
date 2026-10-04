@@ -1,8 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, relative, sep } from 'node:path';
 import type { ObjectStorage } from './object-storage.js';
 
 /**
@@ -59,6 +59,37 @@ export class LocalObjectStorage implements ObjectStorage {
     } catch {
       return false;
     }
+  }
+
+  async listObjectKeys(prefix: string) {
+    const keys: string[] = [];
+    await walkFiles(this.root, async (abs) => {
+      if (abs.endsWith('.ctype')) return;
+      const rel = relative(this.root, abs).split(sep).join('/');
+      if (rel.startsWith(prefix)) keys.push(rel);
+    });
+    return keys;
+  }
+
+  async deleteObject(key: string) {
+    const path = join(this.root, key);
+    await rm(path, { force: true });
+    await rm(`${path}.ctype`, { force: true });
+  }
+}
+
+async function walkFiles(dir: string, visit: (abs: string) => Promise<void>) {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    const abs = join(dir, name);
+    const info = await stat(abs);
+    if (info.isDirectory()) await walkFiles(abs, visit);
+    else await visit(abs);
   }
 }
 

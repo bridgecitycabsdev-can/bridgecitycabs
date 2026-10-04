@@ -4,6 +4,7 @@ node_modules/
 dist/
 !packages/design-tokens/dist/
 *.log
+loadtest/passenger-tokens.json
 
 # Firebase Admin / Google Cloud service accounts (never commit)
 **/firebase-adminsdk*.json

@@ -44,7 +44,14 @@ export class WeeklyClosingService {
     const accounts = await this.prisma.financialAccount.findMany({
       where: { branchId },
     });
-    const lines = [];
+    const lines: Array<{
+      accountKey: string;
+      accountType: (typeof accounts)[number]['type'];
+      ownerId: string | null;
+      openingCents: number;
+      movementCents: number;
+      closingCents: number;
+    }> = [];
     for (const acct of accounts) {
       const [opening, through] = await Promise.all([
         this.sumEntries(acct.id, { lt: weekStart }),

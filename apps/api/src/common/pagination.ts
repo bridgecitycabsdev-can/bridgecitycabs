@@ -34,7 +34,9 @@ export type Page<T> = {
   };
 };
 
-export function normalizePage(query: Pick<PageQuery, 'page' | 'pageSize'>) {
+export function normalizePage(
+  query: Partial<Pick<PageQuery, 'page' | 'pageSize'>>,
+) {
   const page = query.page ?? 1;
   const pageSize = query.pageSize ?? 20;
   return {

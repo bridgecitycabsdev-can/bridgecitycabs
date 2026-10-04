@@ -26,11 +26,12 @@ model Branch {
   // Placeholder until dispatch confirms how inside town is defined.
   townRadiusKm        Int       @default(15)
   createdAt           DateTime  @default(now())
-  users      User[]
-  vehicles   Vehicle[]
-  drivers    Driver[]
-  fareRules  FareRule[]
-  bookings   Booking[]
+  users           User[]
+  vehicles        Vehicle[]
+  drivers         Driver[]
+  fareRules       FareRule[]
+  bookings        Booking[]
+  closingPeriods  ClosingPeriod[]
 }
 
 model Role {
@@ -140,10 +141,11 @@ model Vehicle {
   seats         Int                       @default(4)
   active        Boolean                   @default(true)
   createdAt     DateTime                  @default(now())
-  assignments   DriverVehicleAssignment[]
-  documents     Document[]
-  bookings      Booking[]
-  offers        BookingOffer[]
+  assignments     DriverVehicleAssignment[]
+  documents       Document[]
+  bookings        Booking[]
+  offers          BookingOffer[]
+  leaseAgreements LeaseAgreement[]
 
   @@unique([branchId, plateNumber])
   @@index([branchId])
@@ -174,6 +176,8 @@ model Driver {
   offers       BookingOffer[]
   shifts       DriverShift[]
   locationConsents DriverLocationConsent[]
+  leaseAgreements  LeaseAgreement[]
+  payouts          DriverPayout[]
 
   @@index([branchId, status])
 }
@@ -256,20 +260,22 @@ model LocationAccessLog {
 }
 
 model Passenger {
-  id            String    @id @default(uuid())
-  legacyId      Int?      @unique
-  userId        String    @unique
-  user          User      @relation(fields: [userId], references: [id])
-  firstName     String
-  lastName      String?
-  phone         String
-  email         String?
-  createdAt     DateTime  @default(now())
-  blocked       Boolean   @default(false)
-  blockReason   String?
-  blockedAt     DateTime?
-  unblockReason String?
-  bookings      Booking[]
+  id             String                    @id @default(uuid())
+  legacyId       Int?                      @unique
+  userId         String                    @unique
+  user           User                      @relation(fields: [userId], references: [id])
+  firstName      String
+  lastName       String?
+  phone          String
+  email          String?
+  createdAt      DateTime                  @default(now())
+  blocked        Boolean                   @default(false)
+  blockReason    String?
+  blockedAt      DateTime?
+  unblockReason  String?
+  bookings       Booking[]
+  paymentMethods PassengerPaymentMethod[]
+  stripeCustomer StripeCustomer?
 }
 
 model DocumentType {
@@ -394,6 +400,27 @@ enum LedgerKind {
   TRIP_CARD
   ADJUSTMENT
   REVERSAL
+  LEASE_DEDUCTION
+  SETTLEMENT
+}
+
+/// Why this Payment row exists (card auth/capture vs overage vs refund).
+enum PaymentPurpose {
+  TRIP_AUTH_CAPTURE
+  TRIP_OVERAGE
+  REFUND
+}
+
+enum PayoutStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum ClosingStatus {
+  DRAFT
+  FINALIZED
 }
 
 enum StopType {
@@ -504,6 +531,15 @@ model Booking {
   cancellationFeeCents Int           @default(0)
   paymentMethod        PaymentMethod @default(CASH)
   paymentStatus        PaymentStatus @default(UNPAID)
+  /// Saved card used for CARD bookings (null for CASH).
+  paymentMethodId      String?
+  savedPaymentMethod   PassengerPaymentMethod? @relation(fields: [paymentMethodId], references: [id])
+  /// Stripe PaymentIntent id for the authorize hold.
+  stripePaymentIntentId String?
+  /// Amount held at authorize (quote + buffer), GST-inclusive cents.
+  authorizedAmountCents Int?
+  /// AUTH_BUFFER_BPS snapshotted when the hold was created.
+  authBufferBps        Int?
   notes                String?
   driverId             String? // current driver snapshot, cleared on un-assign
   driver               Driver?       @relation(fields: [driverId], references: [id])
@@ -529,6 +565,7 @@ model Booking {
   @@index([driverId, status])
   @@index([passengerId, createdAt])
   @@index([scheduledAt])
+  @@index([stripePaymentIntentId])
 }
 
 /// One collection attempt. Amounts are always written by the server; the client
@@ -538,12 +575,14 @@ model Payment {
   bookingId      String
   booking        Booking             @relation(fields: [bookingId], references: [id], onDelete: Restrict)
   method         PaymentMethod
-  /// CASH | FAKE | STRIPE (Day 10). Server-set; not a client amount.
+  /// CASH | FAKE | STRIPE. Server-set; not a client amount.
   provider       String
+  purpose        PaymentPurpose      @default(TRIP_AUTH_CAPTURE)
   status         PaymentRecordStatus @default(PENDING)
   /// GST-inclusive amount for this attempt (server-computed).
   amountCents    Int
   currency       String              @default("CAD")
+  /// Stripe PaymentIntent id (or gateway ref).
   providerRef    String?
   idempotencyKey String?             @unique
   failureCode    String?
@@ -552,6 +591,7 @@ model Payment {
   createdAt      DateTime            @default(now())
 
   @@index([bookingId])
+  @@index([provider, providerRef])
 }
 
 /// Chart-of-accounts style wallet. Keys are stable, e.g. DRIVER_BALANCE:<driverId>.
@@ -569,7 +609,7 @@ model FinancialAccount {
 model LedgerTransaction {
   id           String        @id @default(uuid())
   kind         LedgerKind
-  sourceType   String // BOOKING | REVERSAL | ...
+  sourceType   String // BOOKING | REVERSAL | LEASE | PAYOUT | ...
   sourceId     String
   branchId     String
   description  String?
@@ -605,6 +645,110 @@ model ConsentRecord {
   acceptedAt DateTime @default(now())
 
   @@index([userId, type])
+}
+
+/// Saved Stripe PaymentMethod (card on file).
+model PassengerPaymentMethod {
+  id          String    @id @default(uuid())
+  passengerId String
+  passenger   Passenger @relation(fields: [passengerId], references: [id])
+  stripePmId  String    @unique
+  brand       String?
+  last4       String?
+  expMonth    Int?
+  expYear     Int?
+  isDefault   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  bookings    Booking[]
+
+  @@index([passengerId])
+}
+
+/// Stripe Customer for a passenger (created on first card save).
+model StripeCustomer {
+  id               String    @id @default(uuid())
+  passengerId      String    @unique
+  passenger        Passenger @relation(fields: [passengerId], references: [id])
+  stripeCustomerId String    @unique
+  createdAt        DateTime  @default(now())
+}
+
+/// Deduplicates gateway webhook deliveries (Stripe retries the same event id).
+model WebhookEvent {
+  id          String    @id @default(uuid())
+  provider    String // STRIPE
+  eventId     String
+  type        String
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  payload     Json
+
+  @@unique([provider, eventId])
+}
+
+model LeaseAgreement {
+  id                String    @id @default(uuid())
+  driverId          String
+  driver            Driver    @relation(fields: [driverId], references: [id])
+  vehicleId         String
+  vehicle           Vehicle   @relation(fields: [vehicleId], references: [id])
+  weeklyAmountCents Int
+  startDate         DateTime
+  endDate           DateTime?
+  active            Boolean   @default(true)
+  createdById       String?
+  createdAt         DateTime  @default(now())
+
+  @@index([driverId, active])
+}
+
+/// Manual driver payout (no Stripe Connect yet).
+model DriverPayout {
+  id            String       @id @default(uuid())
+  driverId      String
+  driver        Driver       @relation(fields: [driverId], references: [id])
+  branchId      String
+  amountCents   Int
+  status        PayoutStatus @default(PENDING)
+  method        String // E_TRANSFER | DIRECT_DEPOSIT | CASH
+  reference     String? // e-Transfer confirmation, bank ref, etc.
+  requestedById String?
+  requestedAt   DateTime     @default(now())
+  sentAt        DateTime?
+  sentById      String?
+  failureNote   String?
+
+  @@index([driverId, status])
+}
+
+/// Snapshot of a week's ledger balances. Never mutates LedgerEntry / LedgerTransaction.
+model ClosingPeriod {
+  id            String        @id @default(uuid())
+  branchId      String
+  branch        Branch        @relation(fields: [branchId], references: [id])
+  weekStart     DateTime // UTC instant for branch-local week start
+  weekEnd       DateTime
+  status        ClosingStatus @default(DRAFT)
+  finalizedAt   DateTime?
+  finalizedById String?
+  lines         ClosingLine[]
+  createdAt     DateTime      @default(now())
+
+  @@unique([branchId, weekStart])
+}
+
+model ClosingLine {
+  id              String        @id @default(uuid())
+  closingPeriodId String
+  closingPeriod   ClosingPeriod @relation(fields: [closingPeriodId], references: [id])
+  accountKey      String
+  accountType     AccountType
+  ownerId         String? // driverId when accountType is DRIVER_BALANCE
+  openingCents    Int
+  movementCents   Int
+  closingCents    Int
+
+  @@index([closingPeriodId])
 }
 
 model BookingStop {

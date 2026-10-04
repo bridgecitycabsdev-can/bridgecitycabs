@@ -36,6 +36,12 @@ const PERMISSIONS = [
   'finance.read',
   'finance.write',
   'payments.confirm',
+  'payments.read',
+  'payments.refund',
+  'payouts.run',
+  'payouts.confirm',
+  'closing.manage',
+  'lease_agreements.manage',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
@@ -54,6 +60,12 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'finance.read',
     'finance.write',
     'payments.confirm',
+    'payments.read',
+    'payments.refund',
+    'payouts.run',
+    'payouts.confirm',
+    'closing.manage',
+    'lease_agreements.manage',
   ],
   driver: ['payments.confirm'],
 };

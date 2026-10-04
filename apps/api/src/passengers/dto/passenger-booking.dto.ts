@@ -11,6 +11,7 @@ import {
   IsUUID,
   MaxLength,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { CreateBookingStopDto } from '../../bookings/dto/create-booking.dto.js';
@@ -46,6 +47,11 @@ export class PassengerCreateBookingDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+
+  /** Saved PassengerPaymentMethod id; required when paymentMethod is CARD. */
+  @ValidateIf((dto: PassengerCreateBookingDto) => dto.paymentMethod === 'CARD')
+  @IsUUID()
+  paymentMethodId?: string;
 
   @IsOptional()
   @IsString()

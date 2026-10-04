@@ -3,28 +3,41 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma } from '@prisma/client';
 import type { AuthUser } from '../common/auth-user.js';
 import { normalizePage, paginate } from '../common/pagination.js';
-import { driverBalanceKey } from '../ledger/account-keys.js';
+import {
+  bankClearingKey,
+  driverBalanceKey,
+} from '../ledger/account-keys.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { driverBalanceFromEntries } from '../ledger/trip-postings.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { AccountEntriesQuery } from './dto/account-entries-query.dto.js';
 import type { DriverEarningsQuery } from './dto/driver-earnings-query.dto.js';
+import type { MarkPayoutFailedDto } from './dto/mark-payout-failed.dto.js';
+import type { MarkPayoutSentDto } from './dto/mark-payout-sent.dto.js';
+import type { PayoutQuery } from './dto/payout-query.dto.js';
 
 const FINANCE_READ_ROLES = [
   'accounts_admin',
   'branch_admin',
   'super_admin',
 ] as const;
+const PAYOUT_WRITE_ROLES = ['accounts_admin', 'super_admin'] as const;
 
 @Injectable()
 export class FinanceService {
+  private readonly logger = new Logger(FinanceService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly ledger: LedgerService,
+    private readonly config: ConfigService,
   ) {}
 
   async reverse(user: AuthUser, transactionId: string, reason: string) {
@@ -126,6 +139,230 @@ export class FinanceService {
     const asOf = new Date();
     const balanceCents = await this.balanceForDriver(driver.id, asOf);
     return { balanceCents, asOf: asOf.toISOString() };
+  }
+
+  /**
+   * Creates PENDING DriverPayout rows for every driver the company owes, and
+   * posts SETTLEMENT ledger txns that zero DRIVER_BALANCE. Money movement is
+   * confirmed later via mark-sent.
+   */
+  async runPayouts(user: AuthUser, branchId?: string) {
+    this.assertPayoutWrite(user);
+    const resolvedBranchId = this.resolveBranchId(user, branchId);
+    const method =
+      this.config.get<string>('PAYOUT_METHOD_DEFAULT')?.trim() || 'E_TRANSFER';
+
+    const balances = await this.getBranchDriverBalances(resolvedBranchId);
+    const pending = await this.prisma.driverPayout.findMany({
+      where: { branchId: resolvedBranchId, status: 'PENDING' },
+      select: { driverId: true },
+    });
+    const pendingDrivers = new Set(pending.map((row) => row.driverId));
+
+    const created: Array<{
+      id: string;
+      driverId: string;
+      amountCents: number;
+      status: 'PENDING';
+    }> = [];
+    const skipped: Array<{ driverId: string; reason: string }> = [];
+
+    for (const row of balances) {
+      if (row.balanceCents <= 0) continue;
+      if (pendingDrivers.has(row.driverId)) {
+        skipped.push({ driverId: row.driverId, reason: 'PENDING_PAYOUT_EXISTS' });
+        continue;
+      }
+
+      try {
+        const payout = await this.prisma.$transaction(async (tx) => {
+          const createdPayout = await tx.driverPayout.create({
+            data: {
+              driverId: row.driverId,
+              branchId: resolvedBranchId,
+              amountCents: row.balanceCents,
+              method,
+              requestedById: user.userId,
+            },
+          });
+          await this.ledger.post(tx, {
+            kind: 'SETTLEMENT',
+            sourceType: 'DRIVER_PAYOUT',
+            sourceId: createdPayout.id,
+            branchId: resolvedBranchId,
+            description: `Driver payout ${createdPayout.id}`,
+            createdById: user.userId,
+            lines: [
+              {
+                accountKey: driverBalanceKey(row.driverId),
+                type: 'DRIVER_BALANCE',
+                ownerId: row.driverId,
+                amountCents: row.balanceCents,
+              },
+              {
+                accountKey: bankClearingKey(resolvedBranchId),
+                type: 'PAYMENT_CLEARING',
+                amountCents: -row.balanceCents,
+              },
+            ],
+          });
+          return createdPayout;
+        });
+        created.push({
+          id: payout.id,
+          driverId: payout.driverId,
+          amountCents: payout.amountCents,
+          status: 'PENDING',
+        });
+        pendingDrivers.add(row.driverId);
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2002'
+        ) {
+          skipped.push({
+            driverId: row.driverId,
+            reason: 'PENDING_PAYOUT_EXISTS',
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    this.logger.log(
+      `Payout run branch=${resolvedBranchId}: created=${created.length} skipped=${skipped.length}`,
+    );
+    return {
+      branchId: resolvedBranchId,
+      method,
+      created,
+      skipped,
+    };
+  }
+
+  async listPayouts(user: AuthUser, query: PayoutQuery) {
+    this.assertFinanceRead(user);
+    const scopeBranchId =
+      user.role === 'super_admin'
+        ? query.branchId
+        : (user.branchId ?? undefined);
+    if (user.role !== 'super_admin' && !scopeBranchId) {
+      throw new ForbiddenException();
+    }
+
+    const rows = await this.prisma.driverPayout.findMany({
+      where: {
+        ...(scopeBranchId ? { branchId: scopeBranchId } : {}),
+        ...(query.status ? { status: query.status } : {}),
+        ...(query.driverId ? { driverId: query.driverId } : {}),
+      },
+      orderBy: { requestedAt: 'desc' },
+      include: {
+        driver: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+    return rows.map((row) => this.presentPayout(row));
+  }
+
+  async markPayoutSent(
+    user: AuthUser,
+    id: string,
+    dto: MarkPayoutSentDto,
+  ) {
+    this.assertPayoutWrite(user);
+    const payout = await this.requirePayout(user, id);
+    if (payout.status !== 'PENDING') {
+      throw new ConflictException('Only PENDING payouts can be marked sent');
+    }
+    const updated = await this.prisma.driverPayout.update({
+      where: { id: payout.id },
+      data: {
+        status: 'SENT',
+        sentAt: new Date(),
+        sentById: user.userId,
+        reference: dto.reference?.trim() || null,
+      },
+      include: {
+        driver: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+    return this.presentPayout(updated);
+  }
+
+  async markPayoutFailed(
+    user: AuthUser,
+    id: string,
+    dto: MarkPayoutFailedDto,
+  ) {
+    this.assertPayoutWrite(user);
+    const note = dto.note.trim();
+    if (!note) throw new BadRequestException('note is required');
+    const payout = await this.requirePayout(user, id);
+    if (payout.status !== 'PENDING') {
+      throw new ConflictException('Only PENDING payouts can be marked failed');
+    }
+    // No automatic ledger reversal — failure reason decides the fix.
+    const updated = await this.prisma.driverPayout.update({
+      where: { id: payout.id },
+      data: {
+        status: 'FAILED',
+        failureNote: note,
+        sentById: user.userId,
+      },
+      include: {
+        driver: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+    return this.presentPayout(updated);
+  }
+
+  /** Day 9 balance query, grouped for every driver in the branch. */
+  async getBranchDriverBalances(branchId: string) {
+    const drivers = await this.prisma.driver.findMany({
+      where: { branchId },
+      select: { id: true },
+    });
+    if (drivers.length === 0) return [];
+
+    const accounts = await this.prisma.financialAccount.findMany({
+      where: {
+        type: 'DRIVER_BALANCE',
+        ownerId: { in: drivers.map((d) => d.id) },
+      },
+      select: { id: true, ownerId: true },
+    });
+    const accountByDriver = new Map(
+      accounts
+        .filter((a): a is typeof a & { ownerId: string } => Boolean(a.ownerId))
+        .map((a) => [a.ownerId, a.id] as const),
+    );
+    const sums =
+      accounts.length === 0
+        ? []
+        : await this.prisma.ledgerEntry.groupBy({
+            by: ['accountId'],
+            where: { accountId: { in: accounts.map((a) => a.id) } },
+            _sum: { amountCents: true },
+          });
+    const sumByAccount = new Map(
+      sums.map((row) => [row.accountId, row._sum.amountCents ?? 0] as const),
+    );
+
+    return drivers.map((driver) => {
+      const accountId = accountByDriver.get(driver.id);
+      const entrySum = accountId ? (sumByAccount.get(accountId) ?? 0) : 0;
+      return {
+        driverId: driver.id,
+        balanceCents: driverBalanceFromEntries([entrySum]),
+      };
+    });
   }
 
   async accountEntries(user: AuthUser, key: string, query: AccountEntriesQuery) {
@@ -314,8 +551,72 @@ export class FinanceService {
     return driverBalanceFromEntries([agg._sum.amountCents ?? 0]);
   }
 
+  private async requirePayout(user: AuthUser, id: string) {
+    const payout = await this.prisma.driverPayout.findUnique({
+      where: { id },
+      include: {
+        driver: {
+          select: { id: true, firstName: true, lastName: true },
+        },
+      },
+    });
+    if (!payout) throw new NotFoundException();
+    this.assertBranch(user, payout.branchId);
+    return payout;
+  }
+
+  private resolveBranchId(user: AuthUser, requested?: string) {
+    if (user.role === 'super_admin') {
+      if (!requested) throw new BadRequestException('branchId is required');
+      return requested;
+    }
+    if (!user.branchId) throw new ForbiddenException();
+    if (requested && requested !== user.branchId) {
+      throw new ForbiddenException();
+    }
+    return user.branchId;
+  }
+
+  private presentPayout(row: {
+    id: string;
+    driverId: string;
+    branchId: string;
+    amountCents: number;
+    status: string;
+    method: string;
+    reference: string | null;
+    requestedById: string | null;
+    requestedAt: Date;
+    sentAt: Date | null;
+    sentById: string | null;
+    failureNote: string | null;
+    driver: { id: string; firstName: string; lastName: string };
+  }) {
+    return {
+      id: row.id,
+      driverId: row.driverId,
+      branchId: row.branchId,
+      amountCents: row.amountCents,
+      status: row.status,
+      method: row.method,
+      reference: row.reference,
+      requestedById: row.requestedById,
+      requestedAt: row.requestedAt.toISOString(),
+      sentAt: row.sentAt?.toISOString() ?? null,
+      sentById: row.sentById,
+      failureNote: row.failureNote,
+      driver: row.driver,
+    };
+  }
+
   private assertFinanceRead(user: AuthUser) {
     if (!FINANCE_READ_ROLES.includes(user.role as (typeof FINANCE_READ_ROLES)[number])) {
+      throw new ForbiddenException();
+    }
+  }
+
+  private assertPayoutWrite(user: AuthUser) {
+    if (!PAYOUT_WRITE_ROLES.includes(user.role as (typeof PAYOUT_WRITE_ROLES)[number])) {
       throw new ForbiddenException();
     }
   }

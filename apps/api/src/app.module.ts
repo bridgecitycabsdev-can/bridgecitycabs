@@ -29,6 +29,7 @@ import { FaresModule } from './fares/fares.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { FinanceModule } from './finance/finance.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { LeaseModule } from './lease/lease.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
 import { PlacesModule } from './places/places.module.js';
@@ -37,6 +38,7 @@ import { RealtimeModule } from './realtime/realtime.module.js';
 import { VehiclesModule } from './vehicles/vehicles.module.js';
 import { DevBoardModule } from './dev/dev-board.module.js';
 import { DispatchConfigModule } from './config/dispatch-config.module.js';
+import { WebhooksModule } from './webhooks/webhooks.module.js';
 
 const devBoardEnabled =
   process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'test';
@@ -72,8 +74,10 @@ const devBoardEnabled =
     BookingsModule,
     FaresModule,
     LedgerModule,
+    LeaseModule,
     FinanceModule,
     PaymentsModule,
+    WebhooksModule,
     DevicesModule,
     PushModule,
     RealtimeModule,

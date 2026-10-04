@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  bankClearingKey,
   companyRevenueKey,
   driverBalanceKey,
   gstPayableKey,
@@ -13,6 +14,7 @@ describe('account keys', () => {
     expect(companyRevenueKey('b1')).toBe('COMPANY_REVENUE:b1');
     expect(gstPayableKey('b1')).toBe('GST_PAYABLE:b1');
     expect(paymentClearingKey('b1')).toBe('PAYMENT_CLEARING:b1');
+    expect(bankClearingKey('b1')).toBe('BANK_CLEARING:b1');
   });
 });
 

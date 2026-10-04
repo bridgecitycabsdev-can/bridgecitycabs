@@ -21,6 +21,7 @@ describe('BookingsService.findAll zone', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
     );
     return { service, count };
   }

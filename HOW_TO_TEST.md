@@ -97,6 +97,104 @@ flutter run -d <id> --dart-define=API_BASE_URL=http://10.0.2.2:3000
 
 Use `http://10.0.2.2:3000` on an Android emulator. On an iOS simulator use `http://localhost:3000`. A physical phone needs your LAN or tunnel URL for both `API_BASE_URL` and `WS_URL`.
 
+## Stripe card payments (Day 10)
+
+Needs the [Stripe CLI](https://stripe.com/docs/stripe-cli) and **test-mode** keys in `apps/api/.env` (`sk_test_…`, `pk_test_…`). Never commit secrets.
+
+```bash
+docker compose up -d && pnpm --filter api start:dev
+```
+
+Separate terminal (keep running):
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
+```
+
+Copy the printed `whsec_…` into `STRIPE_WEBHOOK_SECRET` and restart the API.
+
+### Card booking walk
+
+Use [Stripe’s test card numbers](https://docs.stripe.com/testing#cards) (e.g. `4242 4242 4242 4242`).
+
+```bash
+TOKEN=$(curl -s -X POST localhost:3000/api/v1/auth/otp/verify -H "Content-Type: application/json" \
+  -d '{"phone":"+14035550199","code":"000000"}' | jq -r .accessToken)
+
+# create a SetupIntent, then attach a test card via Stripe’s client SDK (or API) in test mode
+curl -s -X POST localhost:3000/api/v1/passenger/payment-methods/setup-intent \
+  -H "Authorization: Bearer $TOKEN" | jq
+
+# after setup_intent.succeeded (watch stripe listen), list saved methods
+curl -s localhost:3000/api/v1/passenger/payment-methods \
+  -H "Authorization: Bearer $TOKEN" | jq
+
+# book with the saved payment method once it exists (fill stops, vehicleTypeId, quoteToken)
+curl -s -X POST localhost:3000/api/v1/passenger/bookings -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"CARD","paymentMethodId":"<ppm-uuid>", ...stops, vehicleTypeId, quoteToken}'
+```
+
+Complete the trip with the Day 9 driver simulator `--complete` flag. Watch the `stripe listen` terminal: the booking must reach `CLOSED` only after `payment_intent.succeeded`, not immediately when the capture API returns.
+
+Optional synthetic events (no real card):
+
+```bash
+stripe trigger payment_intent.succeeded
+stripe trigger payment_intent.payment_failed
+stripe trigger charge.refunded
+```
+
+### Postgres checks
+
+```sql
+-- confirm the ledger still balances globally after card trips
+select sum("amountCents") from "LedgerEntry";
+
+-- one driver's week, reconciled
+select "accountKey","openingCents","movementCents","closingCents"
+from "ClosingLine" cl join "ClosingPeriod" cp on cp.id = cl."closingPeriodId"
+where cp."branchId" = '<id>' and cp."weekStart" = '<iso>';
+
+-- these two must ERROR (after the week is FINALIZED)
+update "ClosingLine" set "closingCents" = 0;
+```
+
+Re-finalizing an already-finalized week via the API should return **409**, not 200:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  localhost:3000/api/v1/finance/closing-periods/<id>/finalize \
+  -H "Authorization: Bearer $ACCOUNTS_TOKEN"
+```
+
+### Webhook dedupe check
+
+```bash
+stripe trigger payment_intent.succeeded   # fire once
+stripe events resend evt_...              # resend the same event id
+```
+
+Confirm in Postgres that only one `LedgerTransaction` exists for that booking’s `TRIP_CARD` kind despite two deliveries:
+
+```sql
+select count(*) from "LedgerTransaction"
+where kind = 'TRIP_CARD' and "sourceType" = 'BOOKING' and "sourceId" = '<bookingId>';
+```
+
+### Finance / lease smoke (accounts token)
+
+```bash
+# on-demand previous-week close
+curl -s -X POST "localhost:3000/api/v1/finance/closing-periods/run" \
+  -H "Authorization: Bearer $ACCOUNTS_TOKEN" | jq
+
+# settlement
+curl -s -X POST "localhost:3000/api/v1/finance/payouts/run" \
+  -H "Authorization: Bearer $ACCOUNTS_TOKEN" | jq
+```
+
 ## Faster timeout drills
 
 In local `apps/api/.env` (not committed), temporarily set:
@@ -110,15 +208,16 @@ Restart the API, run the timeout/no-driver flows, then put the values back (defa
 
 ## End-of-day verification
 
-Assume `money_core` and `money_guards` migrations are applied, and Google/Firebase keys are restricted. Nothing secret belongs in git.
+Assume Day 9 (`money_*`) and Day 10 (`card_payments_*`) migrations are applied, and Google/Firebase/Stripe keys are restricted. Nothing secret belongs in git.
 
-1. Run one full trip with the simulator (`--complete`) or with the driver app open. The web Money section shows the final fare, and Postgres shows exactly one balanced `TRIP_CASH` transaction.
-2. Tap **Cash collected** twice quickly → a single payment and ledger transaction.
-3. Driver balance matches your hand calculation (`GET /driver/earnings` or the SQL above).
-4. Put the driver app in the background, create a job → notification arrives → tap opens the offer screen with the right countdown.
-5. Kill the app during an active job, restart → returns to the trip or collect screen.
-6. Reverse the transaction as an accounts user → balance returns to zero.
-7. `select sum("amountCents") from "LedgerEntry";` → **0**.
+1. Run one **cash** trip with the simulator (`--complete`). Postgres shows exactly one balanced `TRIP_CASH` transaction.
+2. Run one **card** trip (setup intent → book → sim `--complete`). Booking stays `PAYMENT_PENDING` until `payment_intent.succeeded`, then `CLOSED` with one `TRIP_CARD`.
+3. Tap **Cash collected** twice quickly → a single payment and ledger transaction.
+4. Driver balance matches your hand calculation (`GET /driver/earnings` or the SQL above).
+5. Put the driver app in the background, create a job → notification arrives → tap opens the offer screen with the right countdown.
+6. Kill the app during an active job, restart → returns to the trip or collect screen.
+7. Reverse / refund as an accounts user → `paymentStatus=REFUNDED` and a balanced `REVERSAL`.
+8. `select sum("amountCents") from "LedgerEntry";` → **0**.
 
 ### Web console (dispatch)
 
@@ -128,16 +227,16 @@ Assume `money_core` and `money_guards` migrations are applied, and Google/Fireba
 4. Edit notes on an assigned job → driver snapshot updates.
 5. No drivers online → **NO_DRIVER_FOUND** timeout modal.
 
-## Done when
+## Done when (Day 10)
 
-- [ ] `money_core` and `money_guards` migrations applied
-- [ ] Balanced, immutable ledger with idempotent posting, proven by tests
-- [ ] Property tests pass for fare splitting
-- [ ] Trip completion finalizes fare server-side and the cash flow closes the booking
-- [ ] Reversal, adjust-fare, and balance endpoints work with the right roles
-- [ ] Driver snapshot carries `pendingPayment` and the collect screen survives an app restart
-- [ ] Device tokens follow the logged-in user and are revoked on logout
-- [ ] An offer push arrives with the app backgrounded and opens the right screen
-- [ ] Driver location streams with the app backgrounded on Android, with consent recorded first
-- [ ] No amount is ever accepted from a client, and no secrets are in git
-- [ ] Committed as `feat(api,mobile): ledger, cash payments, push and background location`
+- [ ] `card_payments_and_settlement` and `card_payments_guards` migrations applied
+- [ ] Stripe webhook signature verification rejects tampered payloads
+- [ ] Authorize, capture, decline, `REQUIRES_ACTION`, refund, and cancel-before-trip all behave correctly
+- [ ] Webhook processing is idempotent under a simulated duplicate delivery
+- [ ] Card-on-file save, list, default, and delete work
+- [ ] Lease deductions post weekly, are idempotent per driver per week, and reduce balance correctly
+- [ ] Settlement zeros out exactly the drivers with a positive balance, with no duplicate pending payouts
+- [ ] Weekly closing reconciles against raw ledger sums and locks correctly once finalized
+- [ ] All twelve tests pass
+- [ ] No Stripe secret key or webhook secret in git; only test-mode keys used
+- [ ] Committed as `feat(api): stripe card payments, webhooks, lease deductions, settlement and weekly closing`

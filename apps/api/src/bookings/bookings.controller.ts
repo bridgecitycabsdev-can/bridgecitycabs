@@ -24,6 +24,7 @@ import { BookingStatusDto } from './dto/booking-status.dto.js';
 import { CancelBookingDto } from './dto/cancel-booking.dto.js';
 import { CreateBookingDto } from './dto/create-booking.dto.js';
 import { LookupBookingQuery } from './dto/lookup-booking.dto.js';
+import { RefundBookingDto } from './dto/refund-booking.dto.js';
 import { UnassignBookingDto } from './dto/unassign-booking.dto.js';
 import { UpdateBookingDto } from './dto/update-booking.dto.js';
 
@@ -117,6 +118,18 @@ export class BookingsController {
     @Body() dto: CancelBookingDto,
   ) {
     return this.bookings.cancel(id, dto, user);
+  }
+
+  @Post(':id/refund')
+  @Idempotent()
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  refund(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: RefundBookingDto,
+  ) {
+    return this.bookings.refund(id, dto, user);
   }
 
   @Post(':id/status')

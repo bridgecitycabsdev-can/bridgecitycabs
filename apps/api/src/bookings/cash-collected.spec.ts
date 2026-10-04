@@ -80,7 +80,10 @@ function harness(current = booking()) {
   const paymentProviders = {
     get: vi.fn(() => ({
       name: 'CASH',
-      createPayment: vi.fn(async () => ({ status: 'CAPTURED' as const })),
+      authorize: vi.fn(async () => ({
+        providerRef: 'cash_b1',
+        status: 'CAPTURED' as const,
+      })),
     })),
   };
   const fleet = { republishSnapshot: vi.fn(async () => null) };
@@ -99,6 +102,7 @@ function harness(current = booking()) {
     {} as never,
     ledger as never,
     paymentProviders as never,
+    { releaseAuthorized: vi.fn(async () => undefined) } as never,
   );
   return {
     service,

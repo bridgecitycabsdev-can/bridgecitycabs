@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { describe, expect, it, vi } from 'vitest';
+import { ApiException } from '../common/api-exception.js';
 import { IDEMPOTENT_KEY } from '../idempotency/idempotency.decorator.js';
 import { PassengerBookingsController } from './passenger-bookings.controller.js';
 import { PassengerBookingsService } from './passenger-bookings.service.js';
@@ -76,15 +77,31 @@ function harness() {
     findFirst: vi.fn(async (): Promise<Record<string, unknown> | null> => null),
     findUnique: vi.fn(),
     findUniqueOrThrow: vi.fn(async () => bookingRow()),
-    create: vi.fn(async () => ({ id: bookingId })),
+    create: vi.fn(async ({ data }: { data: { id?: string } }) => ({
+      id: data.id ?? bookingId,
+    })),
   };
   const tx = {
     booking,
+    payment: { create: vi.fn(async () => ({ id: 'pay-1' })) },
     bookingStatusHistory: { create: vi.fn(async () => undefined) },
     bookingAssignment: { updateMany: vi.fn(async () => ({ count: 0 })) },
   };
   const prisma = {
     passenger: { findUnique: vi.fn(async () => ({ ...passenger })) },
+    passengerPaymentMethod: {
+      findFirst: vi.fn(async () => ({
+        id: 'ppm-1',
+        passengerId: 'passenger-1',
+        stripePmId: 'pm_1',
+      })),
+    },
+    stripeCustomer: {
+      findUnique: vi.fn(async () => ({
+        passengerId: 'passenger-1',
+        stripeCustomerId: 'cus_1',
+      })),
+    },
     vehicleType: {
       findUnique: vi.fn(async () => ({ id: vehicleTypeId, active: true })),
     },
@@ -95,6 +112,18 @@ function harness() {
     $transaction: vi.fn(async (fn: (client: typeof tx) => Promise<unknown>) =>
       fn(tx),
     ),
+  };
+  const paymentProviders = {
+    get: vi.fn(() => ({
+      authorize: vi.fn(async () => ({
+        providerRef: 'pi_1',
+        status: 'AUTHORIZED' as const,
+      })),
+      cancel: vi.fn(async () => undefined),
+    })),
+  };
+  const cardHolds = {
+    releaseAuthorized: vi.fn(async () => undefined),
   };
   const state = {
     transition: vi.fn(async (): Promise<Record<string, unknown>> => ({
@@ -127,7 +156,11 @@ function harness() {
   const distance = {
     estimate: vi.fn(async () => ({ meters: 800, seconds: 90 })),
   };
-  const config = { get: vi.fn(() => undefined) } as unknown as ConfigService;
+  const config = {
+    get: vi.fn((key: string) =>
+      key === 'AUTH_BUFFER_BPS' ? '2000' : undefined,
+    ),
+  } as unknown as ConfigService;
   const service = new PassengerBookingsService(
     prisma as never,
     state as never,
@@ -136,8 +169,21 @@ function harness() {
     config,
     events as never,
     distance as never,
+    paymentProviders as never,
+    cardHolds as never,
   );
-  return { service, prisma, tx, state, fares, fleet, events, distance };
+  return {
+    service,
+    prisma,
+    tx,
+    state,
+    fares,
+    fleet,
+    events,
+    distance,
+    paymentProviders,
+    cardHolds,
+  };
 }
 
 describe('PassengerBookingsService', () => {
@@ -265,7 +311,7 @@ describe('PassengerBookingsService', () => {
   });
 
   it('cancels before the trip starts and refuses once the trip has started', async () => {
-    const { service, prisma, state, events } = harness();
+    const { service, prisma, state, events, cardHolds } = harness();
     prisma.booking.findFirst.mockResolvedValue({
       id: bookingId,
       status: 'MATCHED',
@@ -293,6 +339,7 @@ describe('PassengerBookingsService', () => {
       'booking.status_changed',
       expect.objectContaining({ to: 'CANCELLED' }),
     );
+    expect(cardHolds.releaseAuthorized).toHaveBeenCalledWith(bookingId);
 
     const started = harness();
     started.prisma.booking.findFirst.mockResolvedValue({
@@ -303,6 +350,7 @@ describe('PassengerBookingsService', () => {
       started.service.cancel(user, bookingId, {}),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(started.state.transition).not.toHaveBeenCalled();
+    expect(started.cardHolds.releaseAuthorized).not.toHaveBeenCalled();
   });
 
   it('retries a search from NO_DRIVER_FOUND and starts the window over', async () => {
@@ -333,6 +381,99 @@ describe('PassengerBookingsService', () => {
       searching.service.retry(user, bookingId),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(searching.fleet.clearOfferedDrivers).not.toHaveBeenCalled();
+  });
+
+  it('authorizes a card hold before creating the booking and Payment row', async () => {
+    const { service, tx, paymentProviders } = harness();
+    const authorize = vi.fn(async () => ({
+      providerRef: 'pi_auth',
+      status: 'AUTHORIZED' as const,
+    }));
+    paymentProviders.get.mockReturnValue({
+      authorize,
+      cancel: vi.fn(async () => undefined),
+    });
+
+    await service.create(
+      {
+        ...createDto,
+        paymentMethod: 'CARD',
+        paymentMethodId: 'ppm-1',
+      },
+      user,
+    );
+
+    // quote total 1575 × 1.20 = 1890
+    expect(authorize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        amountCents: 1890,
+        customerId: 'cus_1',
+        paymentMethodId: 'pm_1',
+      }),
+    );
+    expect(tx.booking.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          paymentMethod: 'CARD',
+          paymentMethodId: 'ppm-1',
+          stripePaymentIntentId: 'pi_auth',
+          authorizedAmountCents: 1890,
+          authBufferBps: 2000,
+        }),
+      }),
+    );
+    expect(tx.payment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          method: 'CARD',
+          provider: 'STRIPE',
+          purpose: 'TRIP_AUTH_CAPTURE',
+          status: 'AUTHORIZED',
+          amountCents: 1890,
+          providerRef: 'pi_auth',
+        }),
+      }),
+    );
+  });
+
+  it('surfaces CARD_REQUIRES_ACTION so the client can prompt 3DS', async () => {
+    const action = harness();
+    action.paymentProviders.get.mockReturnValue({
+      authorize: vi.fn(async () => ({
+        providerRef: 'pi_3ds',
+        status: 'REQUIRES_ACTION',
+      })),
+      cancel: vi.fn(async () => undefined),
+    });
+    await expect(
+      action.service.create(
+        { ...createDto, paymentMethod: 'CARD', paymentMethodId: 'ppm-1' },
+        user,
+      ),
+    ).rejects.toMatchObject({
+      response: { code: 'CARD_REQUIRES_ACTION' },
+    });
+    expect(action.tx.booking.create).not.toHaveBeenCalled();
+    expect(action.tx.payment.create).not.toHaveBeenCalled();
+  });
+
+  it('does not create a booking when authorize declines the card', async () => {
+    const declined = harness();
+    declined.paymentProviders.get.mockReturnValue({
+      authorize: vi.fn(async () => ({
+        providerRef: 'pi_fail',
+        status: 'FAILED',
+      })),
+      cancel: vi.fn(async () => undefined),
+    });
+    await expect(
+      declined.service.create(
+        { ...createDto, paymentMethod: 'CARD', paymentMethodId: 'ppm-1' },
+        user,
+      ),
+    ).rejects.toMatchObject({ response: { code: 'CARD_DECLINED' } });
+    expect(declined.tx.booking.create).not.toHaveBeenCalled();
+    expect(declined.tx.payment.create).not.toHaveBeenCalled();
   });
 });
 

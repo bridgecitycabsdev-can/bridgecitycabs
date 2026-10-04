@@ -74,7 +74,7 @@ describe('FinanceService.reverse', () => {
         createdAt: new Date('2026-10-03T12:00:00Z'),
       })),
     };
-    const service = new FinanceService(prisma as never, ledger as never);
+    const service = new FinanceService(prisma as never, ledger as never, { get: () => 'E_TRANSFER' } as never);
 
     await expect(
       service.reverse(accountsUser, 'txn-1', 'Passenger refund'),
@@ -141,7 +141,7 @@ describe('FinanceService.reverse', () => {
         fn(tx),
       ),
     };
-    const service = new FinanceService(prisma as never, { post: vi.fn() } as never);
+    const service = new FinanceService(prisma as never, { post: vi.fn() } as never, { get: () => 'E_TRANSFER' } as never);
     await expect(
       service.reverse(accountsUser, 'txn-1', 'again'),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -161,7 +161,7 @@ describe('FinanceService.driverBalance', () => {
         aggregate: vi.fn(async () => ({ _sum: { amountCents: 300 } })),
       },
     };
-    const service = new FinanceService(prisma as never, { post: vi.fn() } as never);
+    const service = new FinanceService(prisma as never, { post: vi.fn() } as never, { get: () => 'E_TRANSFER' } as never);
     await expect(service.driverBalance(accountsUser, 'd1')).resolves.toEqual({
       balanceCents: -300,
       asOf: expect.any(String),
@@ -174,7 +174,7 @@ describe('FinanceService.driverBalance', () => {
         findUnique: vi.fn(async () => ({ id: 'd1', branchId: 'other' })),
       },
     };
-    const service = new FinanceService(prisma as never, { post: vi.fn() } as never);
+    const service = new FinanceService(prisma as never, { post: vi.fn() } as never, { get: () => 'E_TRANSFER' } as never);
     await expect(
       service.driverBalance(accountsUser, 'd1'),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -209,7 +209,7 @@ describe('FinanceService.driverEarnings', () => {
         aggregate: vi.fn(async () => ({ _sum: { amountCents: -1800 } })),
       },
     };
-    const service = new FinanceService(prisma as never, { post: vi.fn() } as never);
+    const service = new FinanceService(prisma as never, { post: vi.fn() } as never, { get: () => 'E_TRANSFER' } as never);
     await expect(
       service.driverEarnings(driverUser, {
         from: '2026-10-01T00:00:00.000Z',

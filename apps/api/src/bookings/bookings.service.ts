@@ -36,6 +36,7 @@ import {
 } from '../jobs/offer-expiry.scheduler.js';
 import { cashTripLedgerLines } from '../ledger/cash-ledger-lines.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { CardHoldService } from '../payments/card-hold.service.js';
 import { PaymentProvidersService } from '../payments/payment-providers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertScheduledAt } from './booking-schedule.js';
@@ -52,6 +53,7 @@ import type { BookingQuery } from './dto/booking-query.dto.js';
 import type { BookingStatusDto } from './dto/booking-status.dto.js';
 import type { CancelBookingDto } from './dto/cancel-booking.dto.js';
 import type { CreateBookingDto } from './dto/create-booking.dto.js';
+import type { RefundBookingDto } from './dto/refund-booking.dto.js';
 import type { ReleaseBookingDto } from './dto/release-booking.dto.js';
 import type { UnassignBookingDto } from './dto/unassign-booking.dto.js';
 import type { UpdateBookingDto } from './dto/update-booking.dto.js';
@@ -71,6 +73,7 @@ const CASH_STAFF_ROLES = [
   'super_admin',
 ] as const;
 const ADJUST_FARE_ROLES = ['branch_admin', 'accounts_admin'] as const;
+const REFUND_ROLES = ['accounts_admin', 'super_admin'] as const;
 
 const listInclude = {
   vehicleType: { select: { id: true, name: true } },
@@ -128,6 +131,7 @@ export class BookingsService {
     @Inject(DISPATCH_QUEUE) private readonly dispatch: DispatchQueue,
     private readonly ledger: LedgerService,
     private readonly paymentProviders: PaymentProvidersService,
+    private readonly cardHolds: CardHoldService,
   ) {}
 
   async create(dto: CreateBookingDto, user: AuthUser) {
@@ -556,8 +560,8 @@ export class BookingsService {
   /**
    * Finalizes fare cents and moves TRIP_STARTED → TRIP_COMPLETED → PAYMENT_PENDING.
    * The Day 5 fleet bridge frees the driver on TRIP_COMPLETED so they can take
-   * another job while payment is still pending. CARD/ACCOUNT/WALLET stay in
-   * PAYMENT_PENDING until Day 10; today every booking is cash.
+   * another job while payment is still pending. For CARD, capture is requested
+   * here; the Stripe webhook posts TRIP_CARD and closes the booking.
    */
   async complete(user: AuthUser, id: string) {
     const driver = await this.prisma.driver.findUnique({
@@ -566,8 +570,8 @@ export class BookingsService {
     });
     if (!driver) throw new NotFoundException();
 
-    const { completed, pending, response } = await this.prisma.$transaction(
-      async (tx) => {
+    const { completed, pending, response, cardCapture } =
+      await this.prisma.$transaction(async (tx) => {
         const booking = await tx.booking.findUnique({
           where: { id },
           include: { branch: { select: { commissionBps: true } } },
@@ -612,9 +616,25 @@ export class BookingsService {
           { type: 'SYSTEM' },
           { tx },
         );
+
+        let cardCapture:
+          | {
+              providerRef: string;
+              amountCents: number;
+              idempotencyKey: string;
+            }
+          | undefined;
+        if (booking.paymentMethod === 'CARD') {
+          cardCapture = await this.prepareCardCapture(tx, {
+            bookingId: booking.id,
+            finalFareCents: fare.totalCents,
+          });
+        }
+
         return {
           completed,
           pending,
+          cardCapture,
           response: {
             id: booking.id,
             status: pending.to,
@@ -627,12 +647,59 @@ export class BookingsService {
             driverEarningCents: split.driverEarningCents,
           },
         };
-      },
-    );
+      });
 
     await this.events.emitAsync('booking.status_changed', completed);
     await this.events.emitAsync('booking.status_changed', pending);
+
+    if (cardCapture) {
+      // Webhook confirms capture and posts the ledger — do not close here.
+      await this.paymentProviders.get('STRIPE').capture({
+        providerRef: cardCapture.providerRef,
+        amountCents: cardCapture.amountCents,
+        idempotencyKey: cardCapture.idempotencyKey,
+      });
+    }
+
     return response;
+  }
+
+  /**
+   * Caps capture at the authorization hold. Overage stays UNPAID for manual
+   * review on the payment_pending tab (no automatic second charge yet).
+   */
+  private async prepareCardCapture(
+    tx: Prisma.TransactionClient,
+    input: { bookingId: string; finalFareCents: number },
+  ) {
+    const payment = await tx.payment.findFirst({
+      where: {
+        bookingId: input.bookingId,
+        provider: 'STRIPE',
+        purpose: 'TRIP_AUTH_CAPTURE',
+        status: 'AUTHORIZED',
+      },
+    });
+    if (!payment?.providerRef || !payment.idempotencyKey) {
+      throw new ConflictException('Authorized card payment not found');
+    }
+
+    if (input.finalFareCents > payment.amountCents) {
+      await tx.booking.update({
+        where: { id: input.bookingId },
+        data: { paymentStatus: 'UNPAID' },
+      });
+      this.logger.warn(
+        `Booking ${input.bookingId} final fare exceeds authorization; needs a top-up charge`,
+      );
+    }
+
+    return {
+      providerRef: payment.providerRef,
+      amountCents: Math.min(input.finalFareCents, payment.amountCents),
+      // Same Payment.idempotencyKey as authorize; Stripe scopes keys per endpoint.
+      idempotencyKey: payment.idempotencyKey,
+    };
   }
 
   /** Driver confirms cash received. Retries are safe once CLOSED + CAPTURED. */
@@ -801,7 +868,8 @@ export class BookingsService {
 
         const amountCents = booking.finalFareCents;
         const idempotencyKey = `cash:${booking.id}`;
-        const outcome = await this.paymentProviders.get('CASH').createPayment({
+        // Cash confirms receipt in one step; authorize returns CAPTURED.
+        const outcome = await this.paymentProviders.get('CASH').authorize({
           bookingId: booking.id,
           amountCents,
           idempotencyKey,
@@ -925,7 +993,79 @@ export class BookingsService {
         { tx, ...this.cancellation(dto.reason, dto.note) },
       );
     });
+    await this.cardHolds.releaseAuthorized(result.bookingId);
     return this.afterTransition(result, user);
+  }
+
+  /**
+   * Refunds a captured card payment via Stripe. Ledger REVERSAL is applied by
+   * the charge.refunded webhook once Stripe confirms the refund.
+   */
+  async refund(id: string, dto: RefundBookingDto, user: AuthUser) {
+    this.assertRole(user, REFUND_ROLES);
+    const reason = dto.reason.trim();
+    if (!reason) throw new BadRequestException('reason is required');
+
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, ...branchWhere(user) },
+    });
+    if (!booking) throw new NotFoundException();
+    if (booking.paymentMethod !== 'CARD') {
+      throw new ConflictException('Booking is not a card payment');
+    }
+
+    const payment = await this.prisma.payment.findFirst({
+      where: {
+        bookingId: booking.id,
+        provider: 'STRIPE',
+        status: 'CAPTURED',
+        purpose: 'TRIP_AUTH_CAPTURE',
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!payment?.providerRef) {
+      throw new ConflictException('No captured card payment to refund');
+    }
+    if (dto.amountCents > payment.amountCents) {
+      throw new BadRequestException(
+        'amountCents cannot exceed the captured payment',
+      );
+    }
+
+    const idempotencyKey = `refund:${payment.id}:${dto.amountCents}`;
+    await this.paymentProviders.get('STRIPE').refund({
+      providerRef: payment.providerRef,
+      amountCents: dto.amountCents,
+      idempotencyKey,
+    });
+
+    await this.prisma.auditLog.create({
+      data: {
+        actorUserId: user.userId,
+        actorType: 'STAFF',
+        entity: 'booking',
+        entityId: booking.id,
+        action: 'booking.refund_requested',
+        before: {
+          paymentStatus: booking.paymentStatus,
+          paymentId: payment.id,
+        },
+        after: {
+          amountCents: dto.amountCents,
+          reason,
+          providerRef: payment.providerRef,
+          idempotencyKey,
+        },
+      },
+    });
+
+    return {
+      id: booking.id,
+      paymentId: payment.id,
+      providerRef: payment.providerRef,
+      amountCents: dto.amountCents,
+      status: 'REFUND_REQUESTED' as const,
+    };
   }
 
   async setStatus(id: string, dto: BookingStatusDto, user: AuthUser) {
@@ -955,6 +1095,9 @@ export class BookingsService {
         );
       })
       .catch(rethrowAssignmentConflict);
+    if (result.to === 'CANCELLED') {
+      await this.cardHolds.releaseAuthorized(result.bookingId);
+    }
     return this.afterTransition(result, user);
   }
 

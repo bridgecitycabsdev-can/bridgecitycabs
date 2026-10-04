@@ -22,8 +22,25 @@ function booking(overrides: Record<string, unknown> = {}) {
 }
 
 function harness(current = booking()) {
+  const capture = vi.fn(async () => ({ status: 'CAPTURED' as const }));
   const tx = {
-    booking: { findUnique: vi.fn(async () => current) },
+    booking: {
+      findUnique: vi.fn(async () => current),
+      update: vi.fn(async () => current),
+    },
+    payment: {
+      findFirst: vi.fn(async () =>
+        current.paymentMethod === 'CARD'
+          ? {
+              id: 'pay-1',
+              providerRef: 'pi_1',
+              amountCents: 2520,
+              idempotencyKey: 'card-auth:booking',
+              status: 'AUTHORIZED',
+            }
+          : null,
+      ),
+    },
   };
   const prisma = {
     driver: { findUnique: vi.fn(async () => ({ id: 'driver-1' })) },
@@ -57,6 +74,9 @@ function harness(current = booking()) {
       key === 'FIXED_FARE_INCLUDES_GST' ? 'false' : undefined,
     ),
   };
+  const paymentProviders = {
+    get: vi.fn(() => ({ capture })),
+  };
   const service = new BookingsService(
     prisma as never,
     state as never,
@@ -68,14 +88,15 @@ function harness(current = booking()) {
     { cancel: vi.fn() } as never,
     { enqueueAttempt: vi.fn() } as never,
     { post: vi.fn() } as never,
-    { get: vi.fn() } as never,
+    paymentProviders as never,
+    { releaseAuthorized: vi.fn(async () => undefined) } as never,
   );
-  return { service, tx, state, events, prisma, config };
+  return { service, tx, state, events, prisma, config, paymentProviders, capture };
 }
 
 describe('BookingsService.complete', () => {
   it('finalizes fare, patches settlement fields, and emits both transitions in order', async () => {
-    const { service, state, events, tx } = harness();
+    const { service, state, events, tx, capture } = harness();
 
     await expect(service.complete(driverUser, bookingId)).resolves.toEqual({
       id: bookingId,
@@ -122,6 +143,65 @@ describe('BookingsService.complete', () => {
       'TRIP_COMPLETED',
       'PAYMENT_PENDING',
     ]);
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('captures a card hold for the final fare and leaves closing to the webhook', async () => {
+    const { service, capture, tx, state } = harness(
+      booking({ paymentMethod: 'CARD' }),
+    );
+
+    await expect(service.complete(driverUser, bookingId)).resolves.toMatchObject({
+      status: 'PAYMENT_PENDING',
+      paymentMethod: 'CARD',
+      finalFareCents: 2100,
+    });
+
+    // Auth hold was 2520 (quote+buffer); capture equals actual final fare 2100.
+    expect(capture).toHaveBeenCalledWith({
+      providerRef: 'pi_1',
+      amountCents: 2100,
+      idempotencyKey: 'card-auth:booking',
+    });
+    // Capture API must not mark PAID/CLOSED — payment_intent.succeeded does.
+    expect(tx.booking.update).not.toHaveBeenCalled();
+    expect(state.transition.mock.calls.map((c) => c[1])).toEqual([
+      'TRIP_COMPLETED',
+      'PAYMENT_PENDING',
+    ]);
+  });
+
+  it('caps capture and flags overage as UNPAID for manual top-up review', async () => {
+    const { service, capture, tx } = harness(
+      booking({
+        paymentMethod: 'CARD',
+        quotedFareCents: 3000,
+        fixedFareCents: null,
+      }),
+    );
+    // finalizeFare → 3000 + 150 tax = 3150 > auth 2520
+    tx.payment.findFirst.mockResolvedValueOnce({
+      id: 'pay-1',
+      providerRef: 'pi_1',
+      amountCents: 2520,
+      idempotencyKey: 'card-auth:booking',
+      status: 'AUTHORIZED',
+    });
+
+    await expect(service.complete(driverUser, bookingId)).resolves.toMatchObject({
+      finalFareCents: 3150,
+      status: 'PAYMENT_PENDING',
+    });
+
+    expect(tx.booking.update).toHaveBeenCalledWith({
+      where: { id: bookingId },
+      data: { paymentStatus: 'UNPAID' },
+    });
+    expect(capture).toHaveBeenCalledWith({
+      providerRef: 'pi_1',
+      amountCents: 2520,
+      idempotencyKey: 'card-auth:booking',
+    });
   });
 
   it('uses a tax-exclusive fixed fare when FIXED_FARE_INCLUDES_GST is false', async () => {

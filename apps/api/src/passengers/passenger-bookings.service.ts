@@ -5,12 +5,14 @@ import {
   Inject,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { ApiCode } from '../common/api-code.js';
 import { ApiException } from '../common/api-exception.js';
 import { assertScheduledAt } from '../bookings/booking-schedule.js';
@@ -24,6 +26,8 @@ import {
 } from '../fares/distance.service.js';
 import { FaresService } from '../fares/fares.service.js';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
+import { CardHoldService } from '../payments/card-hold.service.js';
+import { PaymentProvidersService } from '../payments/payment-providers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type {
   PassengerCancelBookingDto,
@@ -38,8 +42,19 @@ import {
   type PassengerBookingRow,
 } from './passenger-booking.view.js';
 
+type CardAuth = {
+  bookingId: string;
+  paymentMethodId: string;
+  stripePaymentIntentId: string;
+  authorizedAmountCents: number;
+  authBufferBps: number;
+  idempotencyKey: string;
+};
+
 @Injectable()
 export class PassengerBookingsService {
+  private readonly logger = new Logger(PassengerBookingsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly state: BookingStateService,
@@ -48,6 +63,8 @@ export class PassengerBookingsService {
     private readonly config: ConfigService,
     private readonly events: EventEmitter2,
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
+    private readonly paymentProviders: PaymentProvidersService,
+    private readonly cardHolds: CardHoldService,
   ) {}
 
   async create(dto: PassengerCreateBookingDto, user: AuthUser) {
@@ -102,6 +119,18 @@ export class PassengerBookingsService {
       );
     }
 
+    const paymentMethod = dto.paymentMethod ?? 'CASH';
+    let cardAuth: CardAuth | undefined;
+    let providerRefToCancel: string | undefined;
+    if (paymentMethod === 'CARD') {
+      cardAuth = await this.authorizeCard({
+        passengerId: passenger.id,
+        paymentMethodId: dto.paymentMethodId,
+        totalCents: accepted.totalCents,
+      });
+      providerRefToCancel = cardAuth.stripePaymentIntentId;
+    }
+
     const initial: BookingStatus = scheduledAt ? 'SCHEDULED' : 'CREATED';
     const openedAt = new Date(Date.now() - 1);
     const phone = passenger.phone;
@@ -109,22 +138,38 @@ export class PassengerBookingsService {
       .filter((part) => part && part.trim())
       .join(' ');
 
-    const inserted = await this.insert({
-      dto,
-      user,
-      branchId: branch.id,
-      gstRateBps: branch.gstRateBps,
-      passengerId: passenger.id,
-      passengerName,
-      phone,
-      scheduledAt,
-      initial,
-      openedAt,
-      meters: accepted.distanceM,
-      seconds: accepted.durationS,
-      subtotalCents: accepted.subtotalCents,
-      taxCents: accepted.taxCents,
-    });
+    let inserted: { id: string; opened: unknown };
+    try {
+      inserted = await this.insert({
+        dto: { ...dto, paymentMethod },
+        user,
+        branchId: branch.id,
+        gstRateBps: branch.gstRateBps,
+        passengerId: passenger.id,
+        passengerName,
+        phone,
+        scheduledAt,
+        initial,
+        openedAt,
+        meters: accepted.distanceM,
+        seconds: accepted.durationS,
+        subtotalCents: accepted.subtotalCents,
+        taxCents: accepted.taxCents,
+        cardAuth,
+      });
+      providerRefToCancel = undefined;
+    } finally {
+      if (providerRefToCancel) {
+        await this.paymentProviders
+          .get('STRIPE')
+          .cancel({ providerRef: providerRefToCancel })
+          .catch((error: unknown) => {
+            this.logger.warn(
+              `Failed to cancel Stripe PI ${providerRefToCancel} after booking create failed: ${String(error)}`,
+            );
+          });
+      }
+    }
 
     const row = await this.load(inserted.id);
     await this.events.emitAsync('booking.created', {
@@ -227,6 +272,7 @@ export class PassengerBookingsService {
     });
     // OfferCloseListener cancels any offer still OFFERED once this event is out.
     await this.events.emitAsync('booking.status_changed', result);
+    await this.cardHolds.releaseAuthorized(result.bookingId);
     return this.present(result.bookingId);
   }
 
@@ -258,6 +304,74 @@ export class PassengerBookingsService {
     return this.present(result.bookingId);
   }
 
+  /**
+   * Authorize a card hold before the booking row exists. Uses a pre-allocated
+   * booking id so a decline never leaves an orphaned booking.
+   */
+  private async authorizeCard(input: {
+    passengerId: string;
+    paymentMethodId?: string;
+    totalCents: number;
+  }): Promise<CardAuth> {
+    if (!input.paymentMethodId) {
+      throw new BadRequestException('paymentMethodId is required for CARD');
+    }
+    const [ppm, sc] = await Promise.all([
+      this.prisma.passengerPaymentMethod.findFirst({
+        where: {
+          id: input.paymentMethodId,
+          passengerId: input.passengerId,
+        },
+      }),
+      this.prisma.stripeCustomer.findUnique({
+        where: { passengerId: input.passengerId },
+      }),
+    ]);
+    if (!ppm) throw new NotFoundException('Payment method not found');
+    if (!sc) {
+      throw new UnprocessableEntityException(
+        'Save a card before booking with CARD',
+      );
+    }
+
+    const bookingId = randomUUID();
+    const authBufferBps = this.readInt('AUTH_BUFFER_BPS', 2000);
+    const authAmount = Math.round(
+      input.totalCents * (1 + authBufferBps / 10000),
+    );
+    const idempotencyKey = `card-auth:${bookingId}`;
+    const auth = await this.paymentProviders.get('STRIPE').authorize({
+      bookingId,
+      amountCents: authAmount,
+      customerId: sc.stripeCustomerId,
+      paymentMethodId: ppm.stripePmId,
+      idempotencyKey,
+    });
+    if (auth.status === 'REQUIRES_ACTION') {
+      throw new ApiException(
+        HttpStatus.CONFLICT,
+        ApiCode.CARD_REQUIRES_ACTION,
+        'Card requires additional authentication',
+        { providerRef: auth.providerRef },
+      );
+    }
+    if (auth.status !== 'AUTHORIZED') {
+      throw new ApiException(
+        HttpStatus.UNPROCESSABLE_ENTITY,
+        ApiCode.CARD_DECLINED,
+        'Card was declined',
+      );
+    }
+    return {
+      bookingId,
+      paymentMethodId: ppm.id,
+      stripePaymentIntentId: auth.providerRef,
+      authorizedAmountCents: authAmount,
+      authBufferBps,
+      idempotencyKey,
+    };
+  }
+
   private async insert(input: {
     dto: PassengerCreateBookingDto;
     user: AuthUser;
@@ -273,6 +387,7 @@ export class PassengerBookingsService {
     seconds: number;
     subtotalCents: number;
     taxCents: number;
+    cardAuth?: CardAuth;
   }) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
@@ -289,6 +404,7 @@ export class PassengerBookingsService {
           }
           const created = await tx.booking.create({
             data: {
+              ...(input.cardAuth ? { id: input.cardAuth.bookingId } : {}),
               trackingId: newTrackingId(),
               branchId: input.branchId,
               source: 'PASSENGER_APP',
@@ -309,6 +425,10 @@ export class PassengerBookingsService {
               quotedTaxCents: input.taxCents,
               gstRateBps: input.gstRateBps,
               paymentMethod: input.dto.paymentMethod,
+              paymentMethodId: input.cardAuth?.paymentMethodId,
+              stripePaymentIntentId: input.cardAuth?.stripePaymentIntentId,
+              authorizedAmountCents: input.cardAuth?.authorizedAmountCents,
+              authBufferBps: input.cardAuth?.authBufferBps,
               notes: input.dto.notes?.trim(),
               stops: {
                 create: input.dto.stops.map((stop, index) => ({
@@ -322,6 +442,22 @@ export class PassengerBookingsService {
               },
             },
           });
+          if (input.cardAuth) {
+            await tx.payment.create({
+              data: {
+                bookingId: created.id,
+                method: 'CARD',
+                provider: 'STRIPE',
+                purpose: 'TRIP_AUTH_CAPTURE',
+                status: 'AUTHORIZED',
+                amountCents: input.cardAuth.authorizedAmountCents,
+                currency: 'CAD',
+                providerRef: input.cardAuth.stripePaymentIntentId,
+                idempotencyKey: input.cardAuth.idempotencyKey,
+                createdById: input.user.userId,
+              },
+            });
+          }
           await tx.bookingStatusHistory.create({
             data: {
               bookingId: created.id,

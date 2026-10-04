@@ -240,6 +240,9 @@ importers:
       cookie-parser:
         specifier: ^1.4.7
         version: 1.4.7
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1(supports-color@7.2.0)
       firebase-admin:
         specifier: ^14.5.0
         version: 14.5.0(supports-color@7.2.0)
@@ -267,6 +270,9 @@ importers:
       socket.io:
         specifier: ^4.8.4
         version: 4.8.4(supports-color@7.2.0)
+      stripe:
+        specifier: ^23.0.0
+        version: 23.0.0(@types/node@24.19.0)
       zod:
         specifier: ^4.6.5
         version: 4.6.5
@@ -4696,6 +4702,15 @@ packages:
   strip-final-newline@4.0.0:
     resolution: {integrity: sha512-aulFJcD6YK8V1G7iRB5tigAP4TsHBZZrOV8pjV++zdUwmeV8uzbY7yn6h9MswN62adStNZFuCIx4haBnRuMDaw==}
     engines: {node: '>=18'}
+
+  stripe@23.0.0:
+    resolution: {integrity: sha512-MDE2A5ZVVluYURORaZEVghSmnLJc3w6aHAlZSxDQMsOjOb3V0O6ro/CiaeFlJS4N7uIVmsg98ocRsPmUK6YfyA==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   strnum@2.4.2:
     resolution: {integrity: sha512-rDG3Ah4TV0k1hWvLSzkZtMmLN9+eS+h3knq4MP6A42Y3Yh5qGNnOUs1jJkoSr8FG5dsL28c7KgkIBzSEykqtuw==}
@@ -9611,6 +9626,10 @@ snapshots:
   strip-final-newline@2.0.0: {}
 
   strip-final-newline@4.0.0: {}
+
+  stripe@23.0.0(@types/node@24.19.0):
+    optionalDependencies:
+      '@types/node': 24.19.0
 
   strnum@2.4.2:
     dependencies:

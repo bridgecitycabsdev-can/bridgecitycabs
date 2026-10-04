@@ -26,12 +26,45 @@
 - Reversals: `POST /finance/transactions/:id/reverse` (accounts/super) posts a one-time `REVERSAL` with negated lines and `reversalOfId`, sets `booking.paymentStatus=REFUNDED` when the source was a booking, and audits. Cash reversals put money back on the driver balance; passenger cash refund is a separate real-world step.
 - Reads: `GET /finance/drivers/:id/balance`, `GET /finance/accounts/:key/entries` (finance roles, branch-scoped), `GET /driver/earnings?from&to` (trips + ledger balance).
 - Daily ledger-integrity job: `SUM(LedgerEntry.amountCents)` must be 0; otherwise log at error and alert (never auto-correct).
-- Permissions: `finance.read`, `finance.write`, `payments.confirm`, `bookings.adjust_fare`.
+- Permissions (seeded for `accounts_admin` / `super_admin`): `finance.read`, `finance.write`, `payments.confirm`, `payments.read`, `payments.refund`, `payouts.run`, `payouts.confirm`, `closing.manage`, `lease_agreements.manage`, plus `bookings.adjust_fare`. Runtime guards still use role names today.
 
 ### Payment providers
 
-- `PaymentProvider` (`src/payments/`) abstracts gateways. `CashProvider` returns `CAPTURED` when the driver confirms cash received. `FakeProvider` is registered only when `ALLOW_FAKE_PAYMENTS` is set, and that flag is forbidden in production (same boot assert pattern as `OTP_DEV_CODE`).
-- **Day 10:** Stripe (or Moneris / another Canadian gateway), webhooks, and a `WebhookEvent` dedupe table. Compare fees and Interac debit support before committing. Integrate via hosted card fields or the provider SDK so card numbers never touch BridgeCabs servers.
+- `PaymentProvider` (`src/payments/`) exposes `authorize` / `capture` / `cancel` / `refund`. `CashProvider.authorize` returns `CAPTURED` when the driver confirms cash. `FakeProvider` registers only when `ALLOW_FAKE_PAYMENTS` is set (forbidden in production). `StripeProvider` registers when `STRIPE_SECRET_KEY` is set: manual-capture PaymentIntents (`capture_method: 'manual'`, `off_session` for saved cards), CAD, Stripe idempotency keys reused from `Payment.idempotencyKey`. `REQUIRES_ACTION` (3DS) must be handled in the passenger app — never assume authorize succeeded.
+- **Day 10 — Stripe (chosen):** operates cleanly in Canada, CAD, hosted Elements/PaymentSheet so card numbers never touch BridgeCabs servers (easiest PCI path). Moneris remains a reasonable Canadian alternative for a fee comparison; the same authorize/capture/webhook pattern applies to either. Use **test-mode** keys only (`sk_test_` / `pk_test_`); enable CAD in the Stripe Dashboard. Keep live keys out until Day 14’s production hardening pass. Env: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PUBLISHABLE_KEY`, `AUTH_BUFFER_BPS` (default 2000), `LEASE_DEDUCTION_DAY` (default `MON`), `PAYOUT_METHOD_DEFAULT` (default `E_TRANSFER`).
+
+### Day 10 — Card authorize / capture / settlement
+
+- **Authorize at booking, capture at completion** — `POST /passenger/bookings` with `paymentMethod: CARD` authorizes (quote × `(1 + AUTH_BUFFER_BPS/10000)`) *before* inserting the booking + `Payment(AUTHORIZED)` in one transaction; declines never orphan a booking (`CARD_REQUIRES_ACTION` / `CARD_DECLINED`). On driver complete, capture is capped at the hold; overage leaves `paymentStatus: UNPAID` on the payment_pending tab for manual review (no automatic second charge yet). Capture API call is not ledger truth — the Stripe webhook posts `TRIP_CARD` and closes the booking.
+- **Card-on-file** — `POST /passenger/payment-methods/setup-intent` creates (or reuses) `StripeCustomer` and returns a SetupIntent `clientSecret` (`usage: off_session`). The passenger app confirms the card in Stripe’s client SDK; raw PANs never hit this API. A `setup_intent.succeeded` webhook (Step 8) writes `PassengerPaymentMethod`. Also: `GET /passenger/payment-methods`, `POST …/:id/default`, `DELETE …/:id` (detach + delete). Booking references a saved method via `paymentMethodId` → `stripePmId`.
+- **Webhooks are the source of truth** for payment state, not the client’s “I finished paying” call. `POST /api/v1/webhooks/stripe` (`@Public`) verifies `stripe-signature` against the **raw** body (`express.raw` in `main.ts`). `WebhookEvent` upserts by `(provider, eventId)` and skips work when `processedAt` is set. Handlers: `setup_intent.succeeded` → `PassengerPaymentMethod`; `payment_intent.amount_capturable_updated` → `AUTHORIZED`; `payment_intent.succeeded` → `CAPTURED` + `TRIP_CARD` ledger + `PAYMENT_PENDING` → `CLOSED`; `payment_intent.payment_failed` → `FAILED` (stays on payment_pending); `charge.refunded` → `REFUNDED` + ledger `REVERSAL`. Ledger `post` is also idempotent by `(sourceType, sourceId, kind)`.
+- **Cancel before capture** — staff/passenger cancel (and staff status→CANCELLED) calls `CardHoldService.releaseAuthorized`, which `paymentIntents.cancel`s when `Payment.status === AUTHORIZED` and marks the Payment `CANCELLED`.
+- **Refund after capture** — `POST /bookings/:id/refund` (`accounts_admin` / `super_admin`) calls Stripe `refund`; ledger reversal waits for `charge.refunded`.
+
+### Local Stripe webhook forwarding
+
+Install the [Stripe CLI](https://stripe.com/docs/stripe-cli) (`winget install Stripe.StripeCli` on Windows). While developing, keep a dedicated terminal open:
+
+```bash
+stripe login
+stripe listen --forward-to localhost:3000/api/v1/webhooks/stripe
+```
+
+Copy the printed `whsec_...` into `apps/api/.env` as `STRIPE_WEBHOOK_SECRET` and restart the API. Synthetic events (no real card):
+
+```bash
+stripe trigger payment_intent.succeeded
+stripe trigger payment_intent.payment_failed
+stripe trigger charge.refunded
+```
+- **Payouts are manual for now** — `POST /finance/payouts/run` creates `DriverPayout(PENDING)` for every driver with positive balance (and no pending payout) and posts `SETTLEMENT` (debit `DRIVER_BALANCE`, credit `BANK_CLEARING:{branchId}`). `GET /finance/payouts`, `POST …/mark-sent`, `POST …/mark-failed` (`accounts_admin` / `super_admin` write; finance roles read). Failed payouts need a manual reversing entry — no automatic REVERSAL. Stripe Connect is a later upgrade.
+- **Weekly closing is a snapshot, not a mutation** — `POST /finance/closing-periods/run` (and the `weekly-close` BullMQ job, local midnight the day after `LEASE_DEDUCTION_DAY`) materializes `ClosingPeriod` / `ClosingLine` opening/movement/closing cents per account from ledger sums. Never writes `LedgerEntry` / `LedgerTransaction`. DRAFT periods may be recomputed freely; `POST …/finalize` (`accounts_admin` / `super_admin`) locks the week. `GET /finance/closing-periods` and `GET …/:id` feed the Weekly Ledger Closing screen.
+- **Lease deductions** — weekly BullMQ job (`lease-deduction`) at `LEASE_DEDUCTION_DAY` local midnight per distinct `Branch.timezone`. Posts `LEASE_DEDUCTION` with `sourceType=LEASE_WEEK`, `sourceId={leaseId}:{weekStartISO}` (idempotent re-run). Debit `DRIVER_BALANCE`, credit `LEASE_RECEIVABLE:{branchId}` (`AccountType.COMPANY_REVENUE`). CRUD: `POST/GET/PATCH /lease-agreements` (`super_admin`, `branch_admin`).
+
+**Business-rule defaults** (confirm with dispatch/accounts against legacy Lease Deduction and Weekly Ledger Closing screens; change later without rewriting history):
+
+- Week starts **Monday 00:00** in `Branch.timezone`.
+- Missed lease **does not auto-carry**; the next week posts a fresh deduction. Disputes use ledger `REVERSAL`.
 
 ### Posting rules
 
@@ -59,5 +92,7 @@ Commission model, who remits GST, and whether fixed fares include GST vary by co
 
 - `Branch.commissionBps` defaults to `0`. Import the real legacy deduction later; seed values are placeholders.
 - Booking snapshots `gstRateBps` at creation and `commissionBps` at completion so later branch config changes do not rewrite history.
-- Ledger invariants live in Postgres: non-zero entries, deferred balance check, append-only triggers, one `CAPTURED` payment per booking.
-- Triggers stop the application role; a superuser can still drop them. **Day 10 deployment checklist:** run the API under a DB role with no `UPDATE` / `DELETE` / `TRUNCATE` on `LedgerEntry` and `LedgerTransaction`.
+- Ledger invariants live in Postgres: non-zero entries, deferred balance check, append-only triggers. One `CAPTURED` payment per `(bookingId, purpose)` (allows trip auth capture + overage).
+- Day 10 tables: `StripeCustomer`, `PassengerPaymentMethod`, `WebhookEvent`, `LeaseAgreement`, `DriverPayout`, `ClosingPeriod` / `ClosingLine`. Booking holds `stripePaymentIntentId`, `authorizedAmountCents`, `authBufferBps`, `paymentMethodId`.
+- Day 10 guards: unique webhook `(provider, eventId)`, at most one `PENDING` payout per driver, `ClosingLine` immutable once its `ClosingPeriod` is `FINALIZED` (`forbid_finalized_closing_line_mutation`).
+- Triggers stop the application role; a superuser can still drop them. **Deployment checklist:** run the API under a DB role with no `UPDATE` / `DELETE` / `TRUNCATE` on `LedgerEntry` / `LedgerTransaction`, and no mutation of finalized `ClosingLine` rows. Keep `STRIPE_*` secrets and service accounts out of git.

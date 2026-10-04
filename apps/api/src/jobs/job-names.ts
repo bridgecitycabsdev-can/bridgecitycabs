@@ -7,6 +7,8 @@ export const JOB_NAMES = {
   locationRetention: 'location-retention',
   paymentPendingAlert: 'payment-pending-alert',
   ledgerIntegrity: 'ledger-integrity',
+  leaseDeduction: 'lease-deduction',
+  weeklyClose: 'weekly-close',
   offerExpire: 'offer-expire',
   dispatchAttempt: 'dispatch-attempt',
   scheduledRelease: 'scheduled-release',

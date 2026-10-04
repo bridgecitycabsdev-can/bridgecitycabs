@@ -9,15 +9,29 @@ import type { PaymentProvider } from './payment-provider.js';
 export class FakeProvider implements PaymentProvider {
   readonly name = 'FAKE';
 
-  async createPayment(i: {
+  async authorize(i: {
     bookingId: string;
     amountCents: number;
+    customerId?: string;
+    paymentMethodId?: string;
     idempotencyKey: string;
   }) {
     return {
       providerRef: `fake_${i.bookingId}_${i.idempotencyKey}`,
-      status: 'CAPTURED' as const,
+      status: 'AUTHORIZED' as const,
     };
+  }
+
+  async capture(_i: {
+    providerRef: string;
+    amountCents: number;
+    idempotencyKey: string;
+  }) {
+    return { status: 'CAPTURED' as const };
+  }
+
+  async cancel(_i: { providerRef: string }) {
+    // No-op: there is no external hold to release.
   }
 
   async refund(_i: {

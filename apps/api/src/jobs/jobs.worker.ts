@@ -3,6 +3,8 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { IdempotencyService } from '../idempotency/idempotency.service.js';
 import { DispatchJobsService } from '../dispatch/dispatch-jobs.service.js';
+import { WeeklyClosingService } from '../finance/weekly-closing.service.js';
+import { LeaseDeductionService } from '../lease/lease-deduction.service.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 import { LocationFlushService } from './location-flush.service.js';
 import { LocationRetentionService } from './location-retention.service.js';
@@ -21,6 +23,8 @@ export class JobsWorker extends WorkerHost {
     private readonly retention: LocationRetentionService,
     private readonly paymentPendingAlert: PaymentPendingAlertService,
     private readonly ledgerIntegrity: LedgerIntegrityService,
+    private readonly leaseDeduction: LeaseDeductionService,
+    private readonly weeklyClosing: WeeklyClosingService,
     private readonly dispatch: DispatchJobsService,
   ) {
     super();
@@ -46,6 +50,19 @@ export class JobsWorker extends WorkerHost {
       case JOB_NAMES.ledgerIntegrity:
         await this.ledgerIntegrity.check();
         return;
+      case JOB_NAMES.leaseDeduction: {
+        const timezone = jobTimezone(job);
+        await this.leaseDeduction.run(
+          timezone ? { timezone } : {},
+        );
+        return;
+      }
+      case JOB_NAMES.weeklyClose: {
+        const timezone = jobTimezone(job);
+        if (!timezone) return;
+        await this.weeklyClosing.closePreviousWeekForTimezone(timezone);
+        return;
+      }
       case JOB_NAMES.dispatchAttempt: {
         const data = jobData(job);
         if (!data.bookingId) return;
@@ -80,4 +97,11 @@ function jobData(job: Job) {
     offerId: typeof data?.offerId === 'string' ? data.offerId : '',
     n: typeof data?.n === 'number' && Number.isFinite(data.n) ? data.n : 0,
   };
+}
+
+function jobTimezone(job: Job) {
+  const data = job.data as { timezone?: unknown };
+  return typeof data?.timezone === 'string' && data.timezone.trim()
+    ? data.timezone.trim()
+    : '';
 }

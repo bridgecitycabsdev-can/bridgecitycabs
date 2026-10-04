@@ -116,6 +116,7 @@ function harness(current = row()) {
     dispatch as never,
     { post: vi.fn() } as never,
     { get: vi.fn() } as never,
+    { releaseAuthorized: vi.fn(async () => undefined) } as never,
   );
   return { service, prisma, tx, state, events, quotes, dispatch, fleet };
 }

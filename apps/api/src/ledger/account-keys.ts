@@ -15,3 +15,8 @@ export function gstPayableKey(branchId: string) {
 export function paymentClearingKey(branchId: string) {
   return `PAYMENT_CLEARING:${branchId}`;
 }
+
+/** Manual payout clearing (e-Transfer / deposit in flight). */
+export function bankClearingKey(branchId: string) {
+  return `BANK_CLEARING:${branchId}`;
+}

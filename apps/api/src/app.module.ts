@@ -10,12 +10,14 @@ import type { Redis } from 'ioredis';
 import { AuthModule } from './auth/auth.module.js';
 import { AppController } from './app.controller.js';
 import { AppService } from './app.service.js';
+import { AuditModule } from './audit/audit.module.js';
 import { ApiExceptionFilter } from './common/api-exception.filter.js';
 import { JwtAuthGuard } from './common/jwt-auth.guard.js';
 import { RejectTokenQueryMiddleware } from './common/reject-token-query.middleware.js';
 import { RolesGuard } from './common/roles.guard.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { BranchesModule } from './branches/branches.module.js';
+import { UsersModule } from './users/users.module.js';
 import { CatalogModule } from './catalog/catalog.module.js';
 import { AssignmentsModule } from './assignments/assignments.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
@@ -38,6 +40,7 @@ import { RatingsModule } from './ratings/ratings.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { SupportModule } from './support/support.module.js';
 import { SosModule } from './sos/sos.module.js';
+import { ReportingModule } from './reporting/reporting.module.js';
 import { PlacesModule } from './places/places.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
@@ -64,7 +67,9 @@ const devBoardEnabled =
     EventEmitterModule.forRoot(),
     PrismaModule,
     IdempotencyModule,
+    AuditModule,
     AuthModule,
+    UsersModule,
     BranchesModule,
     CatalogModule,
     VehiclesModule,
@@ -87,6 +92,7 @@ const devBoardEnabled =
     NotificationsModule,
     SupportModule,
     SosModule,
+    ReportingModule,
     FinanceModule,
     PaymentsModule,
     WebhooksModule,

@@ -8,6 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
@@ -22,6 +23,7 @@ export class LeaseAgreementsController {
   constructor(private readonly leases: LeaseAgreementsService) {}
 
   @Post()
+  @Audited('lease_agreement', 'created')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateLeaseAgreementDto) {
     return this.leases.create(dto, user);
   }
@@ -40,6 +42,7 @@ export class LeaseAgreementsController {
   }
 
   @Patch(':id')
+  @Audited('lease_agreement', 'updated')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,

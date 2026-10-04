@@ -4,6 +4,7 @@ import { IdempotencyModule } from '../idempotency/idempotency.module.js';
 import { DispatchModule } from '../dispatch/dispatch.module.js';
 import { FinanceModule } from '../finance/finance.module.js';
 import { LeaseModule } from '../lease/lease.module.js';
+import { ReportingModule } from '../reporting/reporting.module.js';
 import { QueueModule } from './queue.module.js';
 import { JobsScheduler } from './jobs.scheduler.js';
 import { JobsWorker } from './jobs.worker.js';
@@ -22,6 +23,7 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     IdempotencyModule,
     LeaseModule,
     FinanceModule,
+    ReportingModule,
     ...(workersEnabled ? [DispatchModule] : []),
   ],
   providers: [

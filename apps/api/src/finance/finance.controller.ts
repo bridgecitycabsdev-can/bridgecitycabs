@@ -9,12 +9,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { AccountEntriesQuery } from './dto/account-entries-query.dto.js';
 import { ClosingPeriodQuery } from './dto/closing-period-query.dto.js';
 import { GenerateInvoiceDto } from './dto/generate-invoice.dto.js';
+import { GenerateInvoicePdfDto } from './dto/generate-invoice-pdf.dto.js';
 import { InvoiceQuery } from './dto/invoice-query.dto.js';
 import { MarkPayoutFailedDto } from './dto/mark-payout-failed.dto.js';
 import { MarkPayoutSentDto } from './dto/mark-payout-sent.dto.js';
@@ -139,6 +141,18 @@ export class FinanceController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.invoices.get(user, id);
+  }
+
+  @Post('invoices/:id/generate-pdf')
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  @Audited('invoice', 'pdf_generated')
+  generateInvoicePdf(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: GenerateInvoicePdfDto,
+  ) {
+    return this.invoices.generatePdf(user, id, dto);
   }
 
   @Post('invoices/:id/send')

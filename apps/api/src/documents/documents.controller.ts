@@ -9,6 +9,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
@@ -30,6 +31,7 @@ export class DocumentsController {
   @Post(':id/review')
   @HttpCode(HttpStatus.OK)
   @Roles('super_admin', 'branch_admin', 'hr_admin')
+  @Audited('document', 'reviewed')
   review(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,

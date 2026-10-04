@@ -37,6 +37,8 @@ model Branch {
   promoCodes         PromoCode[]
   supportTickets     SupportTicket[]
   sosAlerts          SosAlert[]
+  dailyStats         DailyBranchStat[]
+  generatedReports   GeneratedReport[]
   /// Monotonic counter for INV-{year}-{seq} numbering within the branch.
   invoiceSeq         Int       @default(0)
   /// Monotonic counter for TCK-{seq} numbering within the branch.
@@ -484,6 +486,19 @@ enum SosStatus {
   FALSE_ALARM
 }
 
+enum ReportType {
+  INVOICE
+  DAILY_SUMMARY
+  CUSTOM_BOOKING_REPORT
+}
+
+enum ReportStatus {
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+}
+
 /// Why this Payment row exists (card auth/capture vs overage vs refund).
 enum PaymentPurpose {
   TRIP_AUTH_CAPTURE
@@ -660,6 +675,8 @@ model Booking {
   sosAlerts            SosAlert[]
 
   @@index([branchId, status, createdAt])
+  @@index([branchId, completedAt])
+  @@index([branchId, paymentMethod, paymentStatus])
   @@index([driverId, status])
   @@index([passengerId, createdAt])
   @@index([scheduledAt])
@@ -667,6 +684,7 @@ model Booking {
   @@index([corporateAccountId])
   @@index([invoiceId])
   @@index([promoCodeId])
+  @@index([source, createdAt])
 }
 
 /// One collection attempt. Amounts are always written by the server; the client
@@ -1067,6 +1085,51 @@ model SosAlert {
   createdAt         DateTime       @default(now())
 
   @@index([branchId, status, createdAt])
+}
+
+/// Nightly rollup of finished branch-local calendar days. Today is always live-queried.
+model DailyBranchStat {
+  id                 String   @id @default(uuid())
+  branchId           String
+  branch             Branch   @relation(fields: [branchId], references: [id])
+  /// Branch-local calendar date, stored as UTC midnight of that date.
+  date               DateTime
+  totalRides         Int      @default(0)
+  completedRides     Int      @default(0)
+  activeRides        Int      @default(0)
+  cancelledRides     Int      @default(0)
+  unpaidRides        Int      @default(0)
+  prepaidRides       Int      @default(0)
+  postpaidRides      Int      @default(0)
+  accountCalls       Int      @default(0)
+  sourceDispatch     Int      @default(0)
+  sourceDriverApp    Int      @default(0)
+  sourcePassengerApp Int      @default(0)
+  grossSubtotalCents Int      @default(0)
+  computedAt         DateTime @default(now())
+
+  @@unique([branchId, date])
+  @@index([branchId, date])
+}
+
+/// Persisted standard reports (invoice / daily summary). Ad hoc CSV exports are streamed, not stored.
+model GeneratedReport {
+  id            String       @id @default(uuid())
+  type          ReportType
+  status        ReportStatus @default(QUEUED)
+  branchId      String?
+  branch        Branch?      @relation(fields: [branchId], references: [id])
+  paramsJson    Json
+  /// R2 key once READY.
+  storageKey    String?
+  rowCount      Int?
+  requestedById String?
+  createdAt     DateTime     @default(now())
+  completedAt   DateTime?
+  failureNote   String?
+
+  @@index([requestedById, createdAt])
+  @@index([type, status])
 }
 
 model BookingStop {

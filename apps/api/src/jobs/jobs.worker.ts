@@ -6,6 +6,8 @@ import { DispatchJobsService } from '../dispatch/dispatch-jobs.service.js';
 import { InvoiceService } from '../finance/invoice.service.js';
 import { WeeklyClosingService } from '../finance/weekly-closing.service.js';
 import { LeaseDeductionService } from '../lease/lease-deduction.service.js';
+import { BookingReportService } from '../reporting/booking-report.service.js';
+import { DailyStatsService } from '../reporting/daily-stats.service.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
 import { LocationFlushService } from './location-flush.service.js';
 import { LocationRetentionService } from './location-retention.service.js';
@@ -26,6 +28,8 @@ export class JobsWorker extends WorkerHost {
     private readonly ledgerIntegrity: LedgerIntegrityService,
     private readonly leaseDeduction: LeaseDeductionService,
     private readonly weeklyClosing: WeeklyClosingService,
+    private readonly dailyStats: DailyStatsService,
+    private readonly bookingReports: BookingReportService,
     private readonly invoices: InvoiceService,
     private readonly dispatch: DispatchJobsService,
   ) {
@@ -63,6 +67,30 @@ export class JobsWorker extends WorkerHost {
         const timezone = jobTimezone(job);
         if (!timezone) return;
         await this.weeklyClosing.closePreviousWeekForTimezone(timezone);
+        return;
+      }
+      case JOB_NAMES.dailyStatsRollup: {
+        const timezone = jobTimezone(job);
+        if (!timezone) return;
+        await this.dailyStats.rollupYesterdayForTimezone(timezone);
+        return;
+      }
+      case JOB_NAMES.buildBookingReport: {
+        const data = job.data as {
+          reportId?: unknown;
+          where?: unknown;
+          format?: unknown;
+        };
+        if (typeof data?.reportId !== 'string' || !data.where) return;
+        const format =
+          data.format === 'pdf' || data.format === 'json' || data.format === 'csv'
+            ? data.format
+            : 'csv';
+        await this.bookingReports.processBookingReportJob({
+          reportId: data.reportId,
+          where: data.where as Record<string, unknown>,
+          format,
+        });
         return;
       }
       case JOB_NAMES.invoiceOverdue:

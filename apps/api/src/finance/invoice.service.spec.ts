@@ -99,7 +99,9 @@ describe('InvoiceService.generateForAccount', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
 
     const result = await service.generateForAccount(
       'ca-1',
@@ -148,7 +150,9 @@ describe('InvoiceService.generateForAccount', () => {
       } as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     await expect(
       service.generateForAccount(
         'ca-1',
@@ -238,7 +242,9 @@ describe('InvoiceService.generateForGroup', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     const result = await service.generateForGroup(
       'g-1',
       new Date('2026-09-01T00:00:00.000Z'),
@@ -299,7 +305,9 @@ describe('InvoiceService.send / void / sweepOverdue', () => {
       prisma as never,
       { get: (k: string) => (k === 'INVOICE_DUE_DAYS' ? '30' : undefined) } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     const result = await service.send(accountsUser, 'inv-1');
     expect(result.status).toBe('SENT');
     expect(prisma.invoice.update).toHaveBeenCalledWith(
@@ -351,7 +359,9 @@ describe('InvoiceService.send / void / sweepOverdue', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     await expect(service.void(accountsUser, 'inv-1')).resolves.toMatchObject({
       status: 'VOID',
     });
@@ -375,7 +385,9 @@ describe('InvoiceService.send / void / sweepOverdue', () => {
       } as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     await expect(service.void(accountsUser, 'inv-1')).rejects.toBeInstanceOf(
       ConflictException,
     );
@@ -391,7 +403,9 @@ describe('InvoiceService.send / void / sweepOverdue', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post: vi.fn() } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
     await expect(service.sweepOverdue()).resolves.toEqual({ updated: 3 });
     expect(prisma.invoice.updateMany).toHaveBeenCalledWith({
       where: {
@@ -457,7 +471,9 @@ describe('InvoiceService.recordPayment', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
 
     const result = await service.recordPayment(accountsUser, 'inv-1', {
       amountCents: 1000,
@@ -538,7 +554,9 @@ describe('InvoiceService.recordPayment', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
 
     await expect(
       service.recordPayment(accountsUser, 'inv-1', {
@@ -593,7 +611,9 @@ describe('InvoiceService.recordPayment', () => {
         } as never,
         { get: () => '30' } as never,
         { post: vi.fn() } as never,
-      );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+      )
 
     await expect(
       make(voidTx).recordPayment(accountsUser, 'inv-1', {
@@ -661,7 +681,9 @@ describe('InvoiceService.recordPayment', () => {
       prisma as never,
       { get: () => '30' } as never,
       { post } as never,
-    );
+      { buildInvoicePdf: vi.fn() } as never,
+      { putObject: vi.fn(), signedUrl: vi.fn() } as never,
+    )
 
     await service.recordPayment(accountsUser, 'inv-g', {
       amountCents: 1500,

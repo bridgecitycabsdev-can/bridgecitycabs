@@ -82,13 +82,17 @@ export class JobsScheduler implements OnModuleInit {
   }
 
   /**
-   * One scheduler per distinct branch timezone for lease deductions (LEASE_DEDUCTION_DAY
-   * local midnight) and weekly close (the following local midnight).
+   * One scheduler per distinct branch timezone for lease deductions
+   * (LEASE_DEDUCTION_DAY local midnight), weekly close (the following local
+   * midnight), and DailyBranchStat rollup (ROLLUP_JOB_HOUR_LOCAL).
    */
   private async scheduleBranchTimezoneJobs() {
     const day = this.config.get<string>('LEASE_DEDUCTION_DAY');
     const leasePattern = leaseDeductionCronPattern(day);
     const closePattern = weeklyCloseCronPattern(day);
+    const rollupPattern = dailyStatsRollupCronPattern(
+      this.config.get<string>('ROLLUP_JOB_HOUR_LOCAL'),
+    );
     const branches = await this.prisma.branch.findMany({
       select: { timezone: true },
       distinct: ['timezone'],
@@ -120,9 +124,25 @@ export class JobsScheduler implements OnModuleInit {
           opts: template,
         },
       );
+      await this.queue.upsertJobScheduler(
+        `${JOB_NAMES.dailyStatsRollup}:${timezone}`,
+        { pattern: rollupPattern, tz: timezone },
+        {
+          name: JOB_NAMES.dailyStatsRollup,
+          data: { timezone },
+          opts: template,
+        },
+      );
     }
     this.logger.log(
-      `Lease deduction @ ${leasePattern}; weekly close @ ${closePattern} for ${timezones.join(', ')}`,
+      `Lease deduction @ ${leasePattern}; weekly close @ ${closePattern}; daily rollup @ ${rollupPattern} for ${timezones.join(', ')}`,
     );
   }
+}
+
+/** Cron for ROLLUP_JOB_HOUR_LOCAL (0–23) in the branch timezone. Default 1. */
+export function dailyStatsRollupCronPattern(hourEnv?: string | null): string {
+  const parsed = Number.parseInt(hourEnv?.trim() ?? '1', 10);
+  const hour = Number.isFinite(parsed) ? Math.min(23, Math.max(0, parsed)) : 1;
+  return `0 ${hour} * * *`;
 }

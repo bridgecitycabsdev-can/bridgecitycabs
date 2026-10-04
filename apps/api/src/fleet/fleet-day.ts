@@ -11,6 +11,29 @@ export function branchDayWindow(timeZone: string, now = new Date()) {
   }
 }
 
+/** Previous branch-local calendar day (DST-safe via a midday probe). */
+export function previousBranchDayWindow(timeZone: string, now = new Date()) {
+  const today = branchDayWindow(timeZone, now);
+  const probe = new Date(today.start.getTime() - 12 * 60 * 60 * 1000);
+  return branchDayWindow(timeZone, probe);
+}
+
+/** Branch-local calendar date `YYYY-MM-DD` → UTC instant of that local midnight. */
+export function branchLocalDateStart(timeZone: string, ymd: string) {
+  try {
+    return zonedMidnight(timeZone, ymd);
+  } catch {
+    return zonedMidnight('America/Edmonton', ymd);
+  }
+}
+
+/** Add whole calendar days on a UTC instant (safe when `date` is already a zoned midnight). */
+export function addUtcDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
 function windowFor(timeZone: string, now: Date) {
   const ymd = calendarDate(timeZone, now);
   const [year, month, day] = ymd.split('-').map(Number);
@@ -18,13 +41,18 @@ function windowFor(timeZone: string, now: Date) {
   return { start: zonedMidnight(timeZone, ymd), end: zonedMidnight(timeZone, next) };
 }
 
-function calendarDate(timeZone: string, now: Date) {
+export function calendarDate(timeZone: string, now: Date) {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(now);
+}
+
+/** True when both instants fall on the same calendar day in `timeZone`. */
+export function isSameLocalDay(a: Date, b: Date, timeZone: string) {
+  return calendarDate(timeZone, a) === calendarDate(timeZone, b);
 }
 
 function zonedMidnight(timeZone: string, ymd: string) {

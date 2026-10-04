@@ -9,6 +9,8 @@ export const JOB_NAMES = {
   ledgerIntegrity: 'ledger-integrity',
   leaseDeduction: 'lease-deduction',
   weeklyClose: 'weekly-close',
+  dailyStatsRollup: 'daily-stats-rollup',
+  buildBookingReport: 'build-booking-report',
   invoiceOverdue: 'invoice-overdue',
   offerExpire: 'offer-expire',
   dispatchAttempt: 'dispatch-attempt',

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,8 +17,14 @@ import {
   bankClearingKey,
 } from '../ledger/account-keys.js';
 import { LedgerService } from '../ledger/ledger.service.js';
+import { PdfService } from '../pdf/pdf.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  OBJECT_STORAGE,
+  type ObjectStorage,
+} from '../storage/object-storage.js';
 import type { GenerateInvoiceDto } from './dto/generate-invoice.dto.js';
+import type { GenerateInvoicePdfDto } from './dto/generate-invoice-pdf.dto.js';
 import type { InvoiceQuery } from './dto/invoice-query.dto.js';
 import type { RecordInvoicePaymentDto } from './dto/record-invoice-payment.dto.js';
 
@@ -46,6 +53,8 @@ export class InvoiceService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly ledger: LedgerService,
+    private readonly pdf: PdfService,
+    @Inject(OBJECT_STORAGE) private readonly storage: ObjectStorage,
   ) {}
 
   async generate(user: AuthUser, dto: GenerateInvoiceDto) {
@@ -215,6 +224,127 @@ export class InvoiceService {
     this.assertRead(user);
     const invoice = await this.requireInvoice(user, id);
     return this.getPeriod(invoice.id);
+  }
+
+  /**
+   * Build invoice PDF, upsert GeneratedReport(type: INVOICE) at a stable R2 key,
+   * return a presigned download URL. Past-DRAFT regeneration requires confirm.
+   */
+  async generatePdf(
+    user: AuthUser,
+    id: string,
+    dto: GenerateInvoicePdfDto = {},
+  ) {
+    this.assertWrite(user);
+    const invoice = await this.requireInvoice(user, id);
+    if (invoice.status !== 'DRAFT' && !dto.confirm) {
+      throw new ConflictException({
+        code: ApiCode.CONFLICT,
+        message:
+          'Invoice is past DRAFT — pass confirm=true to regenerate the PDF the client may already have',
+        status: invoice.status,
+      });
+    }
+
+    const [branch, account, group, lines] = await Promise.all([
+      this.prisma.branch.findUniqueOrThrow({
+        where: { id: invoice.branchId },
+        select: { id: true, name: true, city: true },
+      }),
+      invoice.corporateAccountId
+        ? this.prisma.corporateAccount.findUnique({
+            where: { id: invoice.corporateAccountId },
+            select: { name: true, billingAddress: true },
+          })
+        : Promise.resolve(null),
+      invoice.groupId
+        ? this.prisma.corporateAccountGroup.findUnique({
+            where: { id: invoice.groupId },
+            select: { name: true },
+          })
+        : Promise.resolve(null),
+      this.prisma.invoiceLine.findMany({
+        where: { invoiceId: invoice.id },
+        orderBy: { bookingId: 'asc' },
+        include: {
+          booking: {
+            select: { trackingId: true, completedAt: true },
+          },
+        },
+      }),
+    ]);
+
+    const billTo = account ?? {
+      name: group?.name ?? 'Corporate account',
+      billingAddress: null as string | null,
+    };
+
+    const body = await this.pdf.buildInvoicePdf(
+      {
+        number: invoice.number,
+        createdAt: invoice.createdAt,
+        dueAt: invoice.dueAt,
+        subtotalCents: invoice.subtotalCents,
+        taxCents: invoice.taxCents,
+        totalCents: invoice.totalCents,
+        lines: lines.map((l) => ({
+          completedAt: l.booking.completedAt,
+          trackingId: l.booking.trackingId,
+          subtotalCents: l.subtotalCents,
+          taxCents: l.taxCents,
+        })),
+      },
+      billTo,
+      branch,
+    );
+
+    const storageKey = `invoices/${invoice.branchId}/${invoice.number}.pdf`;
+    await this.storage.putObject(storageKey, body, 'application/pdf');
+
+    const existing = await this.prisma.generatedReport.findFirst({
+      where: { type: 'INVOICE', storageKey },
+    });
+    const report = existing
+      ? await this.prisma.generatedReport.update({
+          where: { id: existing.id },
+          data: {
+            status: 'READY',
+            storageKey,
+            rowCount: lines.length,
+            completedAt: new Date(),
+            failureNote: null,
+            paramsJson: {
+              invoiceId: invoice.id,
+              number: invoice.number,
+            },
+            requestedById: user.userId,
+          },
+        })
+      : await this.prisma.generatedReport.create({
+          data: {
+            type: 'INVOICE',
+            status: 'READY',
+            branchId: invoice.branchId,
+            storageKey,
+            rowCount: lines.length,
+            completedAt: new Date(),
+            requestedById: user.userId,
+            paramsJson: {
+              invoiceId: invoice.id,
+              number: invoice.number,
+            },
+          },
+        });
+
+    const ttl = this.readInt('REPORT_SIGNED_URL_TTL_SECONDS', 3600);
+    const downloadUrl = await this.storage.signedUrl(storageKey, ttl);
+    return {
+      reportId: report.id,
+      invoiceId: invoice.id,
+      number: invoice.number,
+      storageKey,
+      downloadUrl,
+    };
   }
 
   async send(user: AuthUser, id: string) {

@@ -7,6 +7,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
@@ -21,6 +22,7 @@ export class PromosController {
   constructor(private readonly promos: PromosService) {}
 
   @Post()
+  @Audited('promo_code', 'created')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreatePromoCodeDto) {
     return this.promos.create(user, dto);
   }
@@ -40,6 +42,7 @@ export class PromosController {
   }
 
   @Patch(':id')
+  @Audited('promo_code', 'updated')
   update(
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,

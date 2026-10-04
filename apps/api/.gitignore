@@ -2,6 +2,7 @@
 
 # project files
 .env
+.data/
 
 # compiled output
 /dist

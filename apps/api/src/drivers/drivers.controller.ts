@@ -10,6 +10,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Audited } from '../audit/audited.decorator.js';
 import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
@@ -91,6 +92,7 @@ export class DriversController {
   @Post(':id/approve')
   @HttpCode(HttpStatus.OK)
   @Roles('super_admin', 'branch_admin', 'hr_admin')
+  @Audited('driver', 'approved')
   approve(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
@@ -100,6 +102,7 @@ export class DriversController {
 
   @Post(':id/force-offline')
   @HttpCode(HttpStatus.OK)
+  @Audited('driver', 'force_offline')
   forceOffline(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,
@@ -110,6 +113,7 @@ export class DriversController {
 
   @Post(':id/suspend')
   @HttpCode(HttpStatus.OK)
+  @Audited('driver', 'suspended')
   suspend(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: AuthUser,

@@ -8,6 +8,11 @@ import {
 } from './offer-expiry.scheduler.js';
 import { BullDispatchQueue, DISPATCH_QUEUE, NoopDispatchQueue } from './dispatch-queue.js';
 import { JOBS_QUEUE } from './job-names.js';
+import {
+  BullReportQueue,
+  NoopReportQueue,
+  REPORT_QUEUE,
+} from './report-queue.js';
 
 const workersEnabled = process.env.NODE_ENV !== 'test';
 
@@ -34,7 +39,15 @@ const workersEnabled = process.env.NODE_ENV !== 'test';
     workersEnabled
       ? { provide: DISPATCH_QUEUE, useClass: BullDispatchQueue }
       : { provide: DISPATCH_QUEUE, useClass: NoopDispatchQueue },
+    workersEnabled
+      ? { provide: REPORT_QUEUE, useClass: BullReportQueue }
+      : { provide: REPORT_QUEUE, useClass: NoopReportQueue },
   ],
-  exports: [OFFER_EXPIRY_SCHEDULER, DISPATCH_QUEUE, ...(workersEnabled ? [BullModule] : [])],
+  exports: [
+    OFFER_EXPIRY_SCHEDULER,
+    DISPATCH_QUEUE,
+    REPORT_QUEUE,
+    ...(workersEnabled ? [BullModule] : []),
+  ],
 })
 export class QueueModule {}

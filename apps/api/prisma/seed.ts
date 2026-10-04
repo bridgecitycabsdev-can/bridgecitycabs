@@ -55,6 +55,10 @@ const PERMISSIONS = [
   'support.assign',
   'sos.read',
   'sos.respond',
+  'dashboard.read',
+  'reports.read',
+  'reports.generate',
+  'audit.read',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
@@ -76,6 +80,9 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'support.assign',
     'sos.read',
     'sos.respond',
+    'dashboard.read',
+    'reports.read',
+    'reports.generate',
   ],
   accounts_admin: [
     'bookings.read',
@@ -96,6 +103,9 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'invoices.write',
     'invoices.record_payment',
     'support.read',
+    'dashboard.read',
+    'reports.read',
+    'reports.generate',
   ],
   dispatcher: [
     'corporate.read',
@@ -104,6 +114,8 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'support.assign',
     'sos.read',
     'sos.respond',
+    'dashboard.read',
+    'reports.read',
   ],
   customer_care: [
     'corporate.read',
@@ -112,7 +124,10 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'support.assign',
     'sos.read',
     'sos.respond',
+    'dashboard.read',
+    'reports.read',
   ],
+  hr_admin: ['dashboard.read', 'reports.read', 'drivers.read', 'drivers.write', 'drivers.approve'],
   driver: ['payments.confirm'],
 };
 

@@ -352,3 +352,56 @@ pnpm --filter api exec vitest run src/day12.spec.ts
 - [ ] SOS reaches the dispatch socket immediately, never auto-resolves, and every transition is audited
 - [ ] All eleven tests pass (`src/day12.spec.ts`)
 - [ ] Committed as `feat(api): promotions, ratings, notifications, support tickets and sos`
+
+## Dashboard, reports & audit (Day 13)
+
+```bash
+docker compose up -d && pnpm --filter api start:dev
+
+# backfill a week of history so the chart has something to show
+pnpm --filter api exec tsx scripts/backfill-daily-stats.ts --branch <branchId> --from 2026-09-24 --to 2026-10-01
+
+curl -s "localhost:3000/api/v1/dashboard/metrics?branchId=<id>" -H "Authorization: Bearer $TOKEN" | jq
+curl -s "localhost:3000/api/v1/dashboard/daily-stats?date=2026-09-25&branchId=<id>" -H "Authorization: Bearer $TOKEN" | jq
+curl -s "localhost:3000/api/v1/dashboard/rides-chart?from=2026-09-24&to=2026-10-01&branchId=<id>" -H "Authorization: Bearer $TOKEN" | jq
+
+# a small synchronous report, as CSV
+curl -s "localhost:3000/api/v1/reports/booking-report?from=2026-09-24&to=2026-10-01&branchId=<id>&format=csv" \
+  -H "Authorization: Bearer $TOKEN" -o report.csv && head report.csv
+
+# an invoice PDF, from a Day 11 invoice
+curl -s -X POST "localhost:3000/api/v1/finance/invoices/<invoiceId>/generate-pdf" -H "Authorization: Bearer $TOKEN" | jq
+# then fetch the returned signed URL and confirm it opens as a real PDF
+
+# force the async path by lowering the threshold for a quick check
+REPORT_ASYNC_THRESHOLD_ROWS=1 pnpm --filter api start:dev
+curl -s "localhost:3000/api/v1/reports/booking-report?from=2026-01-01&to=2026-10-01&branchId=<id>" -H "Authorization: Bearer $TOKEN" | jq
+# expect { "async": true, "reportId": "..." }, then poll GET /reports/:id until READY
+```
+
+Permissions seeded: `dashboard.read` (staff broadly), `reports.read`, `reports.generate` (`branch_admin` / `accounts_admin` / `super_admin`), `audit.read` (`super_admin` only). Audit review: `GET /audit-logs?entity=&entityId=&actorUserId=&from=&to=`.
+
+```sql
+-- confirm the rollup matches a direct count for a closed day
+select * from "DailyBranchStat" where "branchId"='<id>' and date='2026-09-25';
+select count(*) from "Booking" where "branchId"='<id>' and "createdAt" >= '2026-09-25' and "createdAt" < '2026-09-26';
+
+-- confirm the newly-closed audit gaps are producing rows
+select entity, action, "createdAt" from "AuditLog" order by "createdAt" desc limit 10;
+```
+
+```bash
+pnpm --filter api exec vitest run src/day13.spec.ts
+```
+
+## Done when (Day 13)
+
+- [ ] reporting migration applied, confirmed booking-report indexes exist
+- [ ] All four dashboard endpoints return correct, branch-scoped numbers, with today always live
+- [ ] Nightly rollup job and backfill script both work and are idempotent
+- [ ] Custom booking report works synchronously under the threshold and asynchronously over it, in JSON, CSV, and PDF
+- [ ] Invoice PDF generates from real Day 11 data and downloads via a signed, access-checked URL
+- [ ] AuditInterceptor is registered globally and every gap from the Step 8 sweep now has a row
+- [ ] GET /audit-logs works and is restricted to super_admin
+- [ ] All ten tests pass (`src/day13.spec.ts`)
+- [ ] Committed as `feat(api): dashboard analytics, custom reports, pdf generation and audit log completeness`

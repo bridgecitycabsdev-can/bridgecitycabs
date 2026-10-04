@@ -103,6 +103,7 @@ function harness(current = booking()) {
     ledger as never,
     paymentProviders as never,
     { releaseAuthorized: vi.fn(async () => undefined) } as never,
+  { checkCreditLimit: vi.fn(), getAccountReceivableBalance: vi.fn() } as never,
   );
   return {
     service,

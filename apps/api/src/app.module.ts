@@ -29,6 +29,7 @@ import { FaresModule } from './fares/fares.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { FinanceModule } from './finance/finance.module.js';
 import { LedgerModule } from './ledger/ledger.module.js';
+import { CorporateModule } from './corporate/corporate.module.js';
 import { LeaseModule } from './lease/lease.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
@@ -75,6 +76,7 @@ const devBoardEnabled =
     FaresModule,
     LedgerModule,
     LeaseModule,
+    CorporateModule,
     FinanceModule,
     PaymentsModule,
     WebhooksModule,

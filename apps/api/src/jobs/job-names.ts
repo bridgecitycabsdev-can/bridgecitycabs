@@ -9,6 +9,7 @@ export const JOB_NAMES = {
   ledgerIntegrity: 'ledger-integrity',
   leaseDeduction: 'lease-deduction',
   weeklyClose: 'weekly-close',
+  invoiceOverdue: 'invoice-overdue',
   offerExpire: 'offer-expire',
   dispatchAttempt: 'dispatch-attempt',
   scheduledRelease: 'scheduled-release',
@@ -28,3 +29,5 @@ export const LOCATION_RETENTION_PATTERN = '10 0 * * *';
 export const PAYMENT_PENDING_ALERT_PATTERN = '0 6 * * *';
 /** 06:15 UTC — global ledger sum must be zero. */
 export const LEDGER_INTEGRITY_PATTERN = '15 6 * * *';
+/** 06:30 UTC — flip past-due SENT/PARTIALLY_PAID invoices to OVERDUE. */
+export const INVOICE_OVERDUE_PATTERN = '30 6 * * *';

@@ -94,6 +94,7 @@ function harness(status = 'SEARCHING_DRIVER', assignMode = 'AUTO') {
     { post: vi.fn() } as never,
     { get: vi.fn() } as never,
     { releaseAuthorized: vi.fn(async () => undefined) } as never,
+  { checkCreditLimit: vi.fn(), getAccountReceivableBalance: vi.fn() } as never,
   );
   return { service, tx, state, fleet, events, expiry, dispatch, booking };
 }

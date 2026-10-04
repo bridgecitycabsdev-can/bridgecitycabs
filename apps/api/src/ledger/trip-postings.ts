@@ -2,7 +2,8 @@ export type TripPostingAccount =
   | 'DRIVER_BALANCE'
   | 'COMPANY_REVENUE'
   | 'GST_PAYABLE'
-  | 'PAYMENT_CLEARING';
+  | 'PAYMENT_CLEARING'
+  | 'ACCOUNTS_RECEIVABLE';
 
 export type TripPostingLine = { acct: TripPostingAccount; amt: number };
 
@@ -35,6 +36,29 @@ export function tripPostings(i: {
           { acct: 'GST_PAYABLE', amt: -i.tax },
         ];
   return lines.filter((l) => l.amt !== 0);
+}
+
+/**
+ * Corporate account trip: company fronts the driver immediately and carries AR.
+ * Revenue/GST recognized at completion; invoice payment later only clears AR → cash.
+ */
+export function accountPostings(i: {
+  corporateAccountId: string;
+  subtotal: number;
+  tax: number;
+  commission: number;
+  driverEarning: number;
+}): Array<{ acct: string; type: TripPostingAccount; amt: number }> {
+  return [
+    {
+      acct: `ACCOUNTS_RECEIVABLE:${i.corporateAccountId}`,
+      type: 'ACCOUNTS_RECEIVABLE',
+      amt: +(i.subtotal + i.tax),
+    },
+    { acct: 'DRIVER_BALANCE', type: 'DRIVER_BALANCE', amt: -i.driverEarning },
+    { acct: 'COMPANY_REVENUE', type: 'COMPANY_REVENUE', amt: -i.commission },
+    { acct: 'GST_PAYABLE', type: 'GST_PAYABLE', amt: -i.tax },
+  ].filter((l) => l.amt !== 0);
 }
 
 /** Driver ledger balance: positive = company owes driver; negative = driver owes company. */

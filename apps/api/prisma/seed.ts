@@ -42,6 +42,12 @@ const PERMISSIONS = [
   'payouts.confirm',
   'closing.manage',
   'lease_agreements.manage',
+  'corporate.read',
+  'corporate.write',
+  'corporate.override_credit_limit',
+  'invoices.read',
+  'invoices.write',
+  'invoices.record_payment',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
@@ -53,6 +59,9 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'bookings.adjust_fare',
     'finance.read',
     'payments.confirm',
+    'corporate.read',
+    'corporate.write',
+    'corporate.override_credit_limit',
   ],
   accounts_admin: [
     'bookings.read',
@@ -66,7 +75,15 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'payouts.confirm',
     'closing.manage',
     'lease_agreements.manage',
+    'corporate.read',
+    'corporate.write',
+    'corporate.override_credit_limit',
+    'invoices.read',
+    'invoices.write',
+    'invoices.record_payment',
   ],
+  dispatcher: ['corporate.read'],
+  customer_care: ['corporate.read'],
   driver: ['payments.confirm'],
 };
 
@@ -301,6 +318,7 @@ async function main() {
       throw new Error('Missing driver or passenger role');
     }
     await seedDemo(branch.id, admin.id, driverRoleId, passengerRoleId, models);
+    await seedDemoCorporateAccount(branch.id, admin.id);
   }
 }
 
@@ -652,6 +670,63 @@ async function upsertPassenger(
       email: person.email,
     },
   });
+}
+
+/** Non-prod only: a Lethbridge hotel account with contacts for New Job search. */
+async function seedDemoCorporateAccount(branchId: string, createdById: string) {
+  const existing = await prisma.corporateAccount.findFirst({
+    where: { branchId, name: 'Prairie Hotel' },
+  });
+  const account =
+    existing ??
+    (await prisma.corporateAccount.create({
+      data: {
+        branchId,
+        name: 'Prairie Hotel',
+        billingEmail: 'ap@prairiehotel.local',
+        billingAddress: '500 Scenic Dr S, Lethbridge, AB',
+        billingCycle: 'MONTHLY',
+        creditLimitCents: 25_000,
+        active: true,
+        notes: 'Seed account for dispatch ACCOUNT booking drills',
+        createdById,
+      },
+    }));
+
+  const contacts = [
+    {
+      name: 'Front Desk',
+      phone: '+14035550210',
+      email: 'frontdesk@prairiehotel.local',
+    },
+    {
+      name: 'Events Coordinator',
+      phone: '+14035550211',
+      email: 'events@prairiehotel.local',
+    },
+  ] as const;
+
+  for (const contact of contacts) {
+    const found = await prisma.corporateAccountContact.findFirst({
+      where: { accountId: account.id, phone: contact.phone },
+    });
+    if (found) {
+      await prisma.corporateAccountContact.update({
+        where: { id: found.id },
+        data: { name: contact.name, email: contact.email, active: true },
+      });
+    } else {
+      await prisma.corporateAccountContact.create({
+        data: {
+          accountId: account.id,
+          name: contact.name,
+          phone: contact.phone,
+          email: contact.email,
+          active: true,
+        },
+      });
+    }
+  }
 }
 
 main()

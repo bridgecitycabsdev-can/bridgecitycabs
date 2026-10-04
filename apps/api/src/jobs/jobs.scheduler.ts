@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   IDEMPOTENCY_PURGE_PATTERN,
+  INVOICE_OVERDUE_PATTERN,
   JOB_NAMES,
   JOBS_QUEUE,
   LOCATION_FLUSH_EVERY_MS,
@@ -66,6 +67,11 @@ export class JobsScheduler implements OnModuleInit {
       JOB_NAMES.ledgerIntegrity,
       { pattern: LEDGER_INTEGRITY_PATTERN, tz: 'UTC' },
       { name: JOB_NAMES.ledgerIntegrity, opts: template },
+    );
+    await this.queue.upsertJobScheduler(
+      JOB_NAMES.invoiceOverdue,
+      { pattern: INVOICE_OVERDUE_PATTERN, tz: 'UTC' },
+      { name: JOB_NAMES.invoiceOverdue, opts: template },
     );
     await this.queue.upsertJobScheduler(
       JOB_NAMES.scheduledSweep,

@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { IdempotencyService } from '../idempotency/idempotency.service.js';
 import { DispatchJobsService } from '../dispatch/dispatch-jobs.service.js';
+import { InvoiceService } from '../finance/invoice.service.js';
 import { WeeklyClosingService } from '../finance/weekly-closing.service.js';
 import { LeaseDeductionService } from '../lease/lease-deduction.service.js';
 import { JOB_NAMES, JOBS_QUEUE } from './job-names.js';
@@ -25,6 +26,7 @@ export class JobsWorker extends WorkerHost {
     private readonly ledgerIntegrity: LedgerIntegrityService,
     private readonly leaseDeduction: LeaseDeductionService,
     private readonly weeklyClosing: WeeklyClosingService,
+    private readonly invoices: InvoiceService,
     private readonly dispatch: DispatchJobsService,
   ) {
     super();
@@ -63,6 +65,9 @@ export class JobsWorker extends WorkerHost {
         await this.weeklyClosing.closePreviousWeekForTimezone(timezone);
         return;
       }
+      case JOB_NAMES.invoiceOverdue:
+        await this.invoices.sweepOverdue();
+        return;
       case JOB_NAMES.dispatchAttempt: {
         const data = jobData(job);
         if (!data.bookingId) return;

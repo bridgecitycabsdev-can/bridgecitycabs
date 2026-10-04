@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CorporateModule } from '../corporate/corporate.module.js';
 import { FaresModule } from '../fares/fares.module.js';
 import { FleetModule } from '../fleet/fleet.module.js';
 import { QueueModule } from '../jobs/queue.module.js';
@@ -10,7 +11,14 @@ import { BookingsService } from './bookings.service.js';
 import { DriverBookingController } from './driver-booking.controller.js';
 
 @Module({
-  imports: [FaresModule, FleetModule, QueueModule, LedgerModule, PaymentsModule],
+  imports: [
+    FaresModule,
+    FleetModule,
+    QueueModule,
+    LedgerModule,
+    PaymentsModule,
+    CorporateModule,
+  ],
   controllers: [BookingsController, DriverBookingController],
   providers: [BookingsService, BookingStateService],
   exports: [BookingsService, BookingStateService],

@@ -20,3 +20,8 @@ export function paymentClearingKey(branchId: string) {
 export function bankClearingKey(branchId: string) {
   return `BANK_CLEARING:${branchId}`;
 }
+
+/** Corporate account receivable — positive sum = amount the account owes. */
+export function accountsReceivableKey(corporateAccountId: string) {
+  return `ACCOUNTS_RECEIVABLE:${corporateAccountId}`;
+}

@@ -15,6 +15,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 
@@ -79,6 +80,26 @@ export class CreateBookingDto {
   @IsOptional()
   @IsEnum(PaymentMethod)
   paymentMethod?: PaymentMethod;
+
+  /** Required when paymentMethod is ACCOUNT (dispatch charge-account booking). */
+  @IsOptional()
+  @IsUUID()
+  corporateAccountId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  corporateContactId?: string;
+
+  /** Requires corporate.override_credit_limit when the credit check would fail. */
+  @IsOptional()
+  @IsBoolean()
+  overrideCreditLimit?: boolean;
+
+  @ValidateIf((o: CreateBookingDto) => o.overrideCreditLimit === true)
+  @IsString()
+  @MinLength(1)
+  @MaxLength(500)
+  overrideReason?: string;
 
   @IsOptional()
   @IsString()

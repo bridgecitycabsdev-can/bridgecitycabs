@@ -14,13 +14,17 @@ import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { AccountEntriesQuery } from './dto/account-entries-query.dto.js';
 import { ClosingPeriodQuery } from './dto/closing-period-query.dto.js';
+import { GenerateInvoiceDto } from './dto/generate-invoice.dto.js';
+import { InvoiceQuery } from './dto/invoice-query.dto.js';
 import { MarkPayoutFailedDto } from './dto/mark-payout-failed.dto.js';
 import { MarkPayoutSentDto } from './dto/mark-payout-sent.dto.js';
 import { PayoutQuery } from './dto/payout-query.dto.js';
+import { RecordInvoicePaymentDto } from './dto/record-invoice-payment.dto.js';
 import { ReverseTransactionDto } from './dto/reverse-transaction.dto.js';
 import { RunClosingQuery } from './dto/run-closing-query.dto.js';
 import { RunPayoutsQuery } from './dto/run-payouts-query.dto.js';
 import { FinanceService } from './finance.service.js';
+import { InvoiceService } from './invoice.service.js';
 import { WeeklyClosingService } from './weekly-closing.service.js';
 
 @Controller('finance')
@@ -28,6 +32,7 @@ export class FinanceController {
   constructor(
     private readonly finance: FinanceService,
     private readonly closing: WeeklyClosingService,
+    private readonly invoices: InvoiceService,
   ) {}
 
   @Post('transactions/:id/reverse')
@@ -109,6 +114,62 @@ export class FinanceController {
     @Param('id', ParseUUIDPipe) id: string,
   ) {
     return this.closing.finalize(user, id);
+  }
+
+  @Post('invoices/generate')
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  generateInvoice(
+    @CurrentUser() user: AuthUser,
+    @Body() dto: GenerateInvoiceDto,
+  ) {
+    return this.invoices.generate(user, dto);
+  }
+
+  @Get('invoices')
+  @Roles('accounts_admin', 'branch_admin', 'super_admin')
+  listInvoices(@CurrentUser() user: AuthUser, @Query() query: InvoiceQuery) {
+    return this.invoices.list(user, query);
+  }
+
+  @Get('invoices/:id')
+  @Roles('accounts_admin', 'branch_admin', 'super_admin')
+  getInvoice(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.invoices.get(user, id);
+  }
+
+  @Post('invoices/:id/send')
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  sendInvoice(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.invoices.send(user, id);
+  }
+
+  @Post('invoices/:id/void')
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  voidInvoice(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.invoices.void(user, id);
+  }
+
+  @Post('invoices/:id/record-payment')
+  @HttpCode(HttpStatus.OK)
+  @Roles('accounts_admin', 'super_admin')
+  recordInvoicePayment(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RecordInvoicePaymentDto,
+  ) {
+    return this.invoices.recordPayment(user, id, dto);
   }
 
   @Get('drivers/:id/balance')

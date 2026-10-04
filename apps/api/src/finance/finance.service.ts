@@ -201,7 +201,7 @@ export class FinanceService {
               },
               {
                 accountKey: bankClearingKey(resolvedBranchId),
-                type: 'PAYMENT_CLEARING',
+                type: 'BANK_CLEARING',
                 amountCents: -row.balanceCents,
               },
             ],

@@ -90,7 +90,7 @@ describe('FinanceService.runPayouts', () => {
           },
           {
             accountKey: 'BANK_CLEARING:branch-1',
-            type: 'PAYMENT_CLEARING',
+            type: 'BANK_CLEARING',
             amountCents: -2500,
           },
         ],

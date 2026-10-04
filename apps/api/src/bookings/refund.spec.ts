@@ -55,6 +55,7 @@ function harness(bookingOverrides: Record<string, unknown> = {}) {
     { post: vi.fn() } as never,
     { get: () => ({ refund }) } as never,
     { releaseAuthorized: vi.fn(async () => undefined) } as never,
+  { checkCreditLimit: vi.fn(), getAccountReceivableBalance: vi.fn() } as never,
   );
   return { service, prisma, refund };
 }

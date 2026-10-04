@@ -34,6 +34,8 @@ import {
   OFFER_EXPIRY_SCHEDULER,
   type OfferExpiryScheduler,
 } from '../jobs/offer-expiry.scheduler.js';
+import { CorporateCreditService } from '../corporate/corporate-credit.service.js';
+import { accountTripLedgerLines } from '../ledger/account-ledger-lines.js';
 import { cashTripLedgerLines } from '../ledger/cash-ledger-lines.js';
 import { LedgerService } from '../ledger/ledger.service.js';
 import { CardHoldService } from '../payments/card-hold.service.js';
@@ -132,6 +134,7 @@ export class BookingsService {
     private readonly ledger: LedgerService,
     private readonly paymentProviders: PaymentProvidersService,
     private readonly cardHolds: CardHoldService,
+    private readonly corporateCredit: CorporateCreditService,
   ) {}
 
   async create(dto: CreateBookingDto, user: AuthUser) {
@@ -177,6 +180,12 @@ export class BookingsService {
           via,
           branch.gstRateBps,
         );
+    const accountBooking = await this.prepareAccountBooking(
+      user,
+      dto,
+      branch.id,
+      priced.subtotalCents + priced.taxCents,
+    );
     const initial: BookingStatus = scheduledAt ? 'SCHEDULED' : 'CREATED';
     const actor = { type: 'STAFF' as const, userId: user.userId };
     const openedAt = new Date(Date.now() - 1);
@@ -196,6 +205,7 @@ export class BookingsService {
       subtotalCents: priced.subtotalCents,
       taxCents: priced.taxCents,
       actor,
+      accountBooking,
     });
 
     await this.events.emitAsync(
@@ -561,7 +571,8 @@ export class BookingsService {
    * Finalizes fare cents and moves TRIP_STARTED → TRIP_COMPLETED → PAYMENT_PENDING.
    * The Day 5 fleet bridge frees the driver on TRIP_COMPLETED so they can take
    * another job while payment is still pending. For CARD, capture is requested
-   * here; the Stripe webhook posts TRIP_CARD and closes the booking.
+   * here; the Stripe webhook posts TRIP_CARD and closes the booking. For ACCOUNT,
+   * AR is posted in this same transaction and the booking closes immediately.
    */
   async complete(user: AuthUser, id: string) {
     const driver = await this.prisma.driver.findUnique({
@@ -570,7 +581,7 @@ export class BookingsService {
     });
     if (!driver) throw new NotFoundException();
 
-    const { completed, pending, response, cardCapture } =
+    const { completed, pending, paid, closed, response, cardCapture } =
       await this.prisma.$transaction(async (tx) => {
         const booking = await tx.booking.findUnique({
           where: { id },
@@ -624,21 +635,36 @@ export class BookingsService {
               idempotencyKey: string;
             }
           | undefined;
+        let paid: BookingTransitionResult | null = null;
+        let closed: BookingTransitionResult | null = null;
+        let status = pending.to;
+
         if (booking.paymentMethod === 'CARD') {
           cardCapture = await this.prepareCardCapture(tx, {
             bookingId: booking.id,
             finalFareCents: fare.totalCents,
           });
+        } else if (booking.paymentMethod === 'ACCOUNT') {
+          ({ paid, closed, status } = await this.settleAccountTrip(tx, {
+            booking,
+            fare,
+            split,
+          }));
         }
 
         return {
           completed,
           pending,
+          paid,
+          closed,
           cardCapture,
           response: {
             id: booking.id,
-            status: pending.to,
+            status,
             paymentMethod: booking.paymentMethod,
+            ...(booking.paymentMethod === 'ACCOUNT'
+              ? { paymentStatus: 'PAID' as const }
+              : {}),
             finalSubtotalCents: fare.subtotalCents,
             finalTaxCents: fare.taxCents,
             finalFareCents: fare.totalCents,
@@ -651,6 +677,8 @@ export class BookingsService {
 
     await this.events.emitAsync('booking.status_changed', completed);
     await this.events.emitAsync('booking.status_changed', pending);
+    if (paid) await this.events.emitAsync('booking.status_changed', paid);
+    if (closed) await this.events.emitAsync('booking.status_changed', closed);
 
     if (cardCapture) {
       // Webhook confirms capture and posts the ledger — do not close here.
@@ -700,6 +728,180 @@ export class BookingsService {
       // Same Payment.idempotencyKey as authorize; Stripe scopes keys per endpoint.
       idempotencyKey: payment.idempotencyKey,
     };
+  }
+
+  /**
+   * Posts TRIP_ACCOUNT ledger lines, marks PAID, and closes in the same txn.
+   * PAID here means the trip is operationally resolved — not that the invoice
+   * has been collected.
+   */
+  private async settleAccountTrip(
+    tx: Prisma.TransactionClient,
+    input: {
+      booking: {
+        id: string;
+        branchId: string;
+        driverId: string | null;
+        corporateAccountId: string | null;
+      };
+      fare: {
+        subtotalCents: number;
+        taxCents: number;
+        totalCents: number;
+      };
+      split: { commissionCents: number; driverEarningCents: number };
+    },
+  ) {
+    if (!input.booking.corporateAccountId || !input.booking.driverId) {
+      throw new ConflictException(
+        'Account booking is missing corporate account or driver',
+      );
+    }
+
+    await tx.payment.create({
+      data: {
+        bookingId: input.booking.id,
+        method: 'ACCOUNT',
+        provider: 'INTERNAL',
+        purpose: 'TRIP_AUTH_CAPTURE',
+        status: 'CAPTURED',
+        amountCents: input.fare.totalCents,
+        currency: 'CAD',
+        idempotencyKey: `account:${input.booking.id}`,
+        capturedAt: new Date(),
+      },
+    });
+
+    await this.ledger.post(tx, {
+      kind: 'TRIP_ACCOUNT',
+      sourceType: 'BOOKING',
+      sourceId: input.booking.id,
+      branchId: input.booking.branchId,
+      description: 'Corporate account trip settlement',
+      lines: accountTripLedgerLines({
+        branchId: input.booking.branchId,
+        driverId: input.booking.driverId,
+        corporateAccountId: input.booking.corporateAccountId,
+        subtotalCents: input.fare.subtotalCents,
+        taxCents: input.fare.taxCents,
+        commissionCents: input.split.commissionCents,
+        driverEarningCents: input.split.driverEarningCents,
+      }),
+    });
+
+    await tx.booking.update({
+      where: { id: input.booking.id },
+      data: { paymentStatus: 'PAID' },
+    });
+
+    const paid = await this.state.transition(
+      input.booking.id,
+      'PAYMENT_COMPLETED',
+      { type: 'SYSTEM' },
+      { tx },
+    );
+    const closed = await this.state.transition(
+      input.booking.id,
+      'CLOSED',
+      { type: 'SYSTEM' },
+      { tx },
+    );
+    return { paid, closed, status: closed.to as BookingStatus };
+  }
+
+  private async prepareAccountBooking(
+    user: AuthUser,
+    dto: CreateBookingDto,
+    branchId: string,
+    totalCents: number,
+  ) {
+    if (dto.paymentMethod !== 'ACCOUNT') return undefined;
+    if (!dto.corporateAccountId) {
+      throw new BadRequestException(
+        'corporateAccountId is required for ACCOUNT bookings',
+      );
+    }
+
+    const account = await this.prisma.corporateAccount.findFirst({
+      where: { id: dto.corporateAccountId, branchId },
+    });
+    if (!account) throw new NotFoundException('Corporate account not found');
+
+    let corporateContactId: string | null = null;
+    if (dto.corporateContactId) {
+      const contact = await this.prisma.corporateAccountContact.findFirst({
+        where: {
+          id: dto.corporateContactId,
+          accountId: account.id,
+          active: true,
+        },
+      });
+      if (!contact) {
+        throw new BadRequestException(
+          'corporateContactId must belong to the corporate account',
+        );
+      }
+      corporateContactId = contact.id;
+    }
+
+    let creditOverride:
+      | {
+          currentCents: number;
+          limitCents: number;
+          requestedCents: number;
+          reason: string;
+        }
+      | undefined;
+    try {
+      await this.corporateCredit.checkCreditLimit(account.id, totalCents);
+    } catch (error) {
+      if (
+        !(error instanceof ConflictException) ||
+        !isCreditLimitExceeded(error)
+      ) {
+        throw error;
+      }
+      if (!dto.overrideCreditLimit) throw error;
+      if (!(await this.hasPermission(user, 'corporate.override_credit_limit'))) {
+        throw new ForbiddenException(
+          'Missing permission corporate.override_credit_limit',
+        );
+      }
+      const reason = dto.overrideReason?.trim();
+      if (!reason) {
+        throw new BadRequestException(
+          'overrideReason is required when overrideCreditLimit is true',
+        );
+      }
+      const body = error.getResponse() as {
+        currentCents: number;
+        limitCents: number;
+        requestedCents: number;
+      };
+      creditOverride = {
+        currentCents: body.currentCents,
+        limitCents: body.limitCents,
+        requestedCents: body.requestedCents,
+        reason,
+      };
+    }
+
+    return {
+      corporateAccountId: account.id,
+      corporateContactId,
+      creditOverride,
+    };
+  }
+
+  private async hasPermission(user: AuthUser, code: string) {
+    const row = await this.prisma.rolePermission.findFirst({
+      where: {
+        role: { name: user.role },
+        permission: { code },
+      },
+      select: { roleId: true },
+    });
+    return Boolean(row);
   }
 
   /** Driver confirms cash received. Retries are safe once CLOSED + CAPTURED. */
@@ -1116,6 +1318,16 @@ export class BookingsService {
     subtotalCents: number;
     taxCents: number;
     actor: { type: 'STAFF'; userId: string };
+    accountBooking?: {
+      corporateAccountId: string;
+      corporateContactId: string | null;
+      creditOverride?: {
+        currentCents: number;
+        limitCents: number;
+        requestedCents: number;
+        reason: string;
+      };
+    };
   }) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       try {
@@ -1143,6 +1355,8 @@ export class BookingsService {
               gstRateBps: input.gstRateBps,
               fixedFareCents: input.dto.fixedFareCents,
               paymentMethod: input.dto.paymentMethod,
+              corporateAccountId: input.accountBooking?.corporateAccountId,
+              corporateContactId: input.accountBooking?.corporateContactId,
               notes: input.dto.notes?.trim(),
               stops: {
                 create: input.dto.stops.map((stop, index) => ({
@@ -1156,6 +1370,27 @@ export class BookingsService {
               },
             },
           });
+          if (input.accountBooking?.creditOverride) {
+            const override = input.accountBooking.creditOverride;
+            await tx.auditLog.create({
+              data: {
+                actorUserId: input.user.userId,
+                actorType: 'STAFF',
+                entity: 'booking',
+                entityId: created.id,
+                action: 'booking.credit_limit_override',
+                before: null,
+                after: {
+                  corporateAccountId: input.accountBooking.corporateAccountId,
+                  currentCents: override.currentCents,
+                  limitCents: override.limitCents,
+                  requestedCents: override.requestedCents,
+                  reason: override.reason,
+                  approvedById: input.user.userId,
+                },
+              },
+            });
+          }
           await tx.bookingStatusHistory.create({
             data: {
               bookingId: created.id,
@@ -1917,6 +2152,16 @@ function cashCollectedResponse(
       capturedAt: payment.capturedAt?.toISOString() ?? null,
     },
   };
+}
+
+function isCreditLimitExceeded(error: ConflictException) {
+  const body = error.getResponse();
+  return (
+    typeof body === 'object' &&
+    body !== null &&
+    'code' in body &&
+    (body as { code: string }).code === ApiCode.CREDIT_LIMIT_EXCEEDED
+  );
 }
 
 function rethrowAssignmentConflict(error: unknown): never {

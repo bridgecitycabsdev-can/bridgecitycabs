@@ -2,6 +2,7 @@ import * as fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 import { finalizeFare, splitFare } from '../fares/finalize-fare.js';
 import {
+  accountPostings,
   driverBalanceFromEntries,
   tripPostings,
 } from './trip-postings.js';
@@ -42,6 +43,28 @@ describe('tripPostings', () => {
       { acct: 'DRIVER_BALANCE', amt: -1800 },
       { acct: 'COMPANY_REVENUE', amt: -200 },
       { acct: 'GST_PAYABLE', amt: -100 },
+    ]);
+    expect(driverBalanceFromEntries([-1800])).toBe(1800);
+  });
+
+  it('posts a balanced account trip where the company carries AR', () => {
+    const lines = accountPostings({
+      corporateAccountId: 'ca-1',
+      subtotal: 2000,
+      tax: 100,
+      commission: 200,
+      driverEarning: 1800,
+    });
+    expect(sum(lines)).toBe(0);
+    expect(lines).toEqual([
+      {
+        acct: 'ACCOUNTS_RECEIVABLE:ca-1',
+        type: 'ACCOUNTS_RECEIVABLE',
+        amt: 2100,
+      },
+      { acct: 'DRIVER_BALANCE', type: 'DRIVER_BALANCE', amt: -1800 },
+      { acct: 'COMPANY_REVENUE', type: 'COMPANY_REVENUE', amt: -200 },
+      { acct: 'GST_PAYABLE', type: 'GST_PAYABLE', amt: -100 },
     ]);
     expect(driverBalanceFromEntries([-1800])).toBe(1800);
   });
@@ -135,18 +158,28 @@ describe('tripPostings', () => {
       fc.property(
         fc.integer({ min: 0, max: 100_000 }),
         fc.integer({ min: 0, max: 10_000 }),
-        fc.constantFrom('CASH' as const, 'CARD' as const),
-        (subtotal, commissionBps, method) => {
+        fc.constantFrom('CASH' as const, 'CARD' as const, 'ACCOUNT' as const),
+        fc.uuid(),
+        (subtotal, commissionBps, method, corporateAccountId) => {
           const tax = Math.round((subtotal * 500) / 10_000);
           const split = splitFare(subtotal, commissionBps);
           expect(split.commissionCents + split.driverEarningCents).toBe(subtotal);
-          const lines = tripPostings({
-            method,
-            subtotal,
-            tax,
-            commission: split.commissionCents,
-            driverEarning: split.driverEarningCents,
-          });
+          const lines =
+            method === 'ACCOUNT'
+              ? accountPostings({
+                  corporateAccountId,
+                  subtotal,
+                  tax,
+                  commission: split.commissionCents,
+                  driverEarning: split.driverEarningCents,
+                })
+              : tripPostings({
+                  method,
+                  subtotal,
+                  tax,
+                  commission: split.commissionCents,
+                  driverEarning: split.driverEarningCents,
+                });
           expect(sum(lines)).toBe(0);
           expect(lines.every((line) => line.amt !== 0)).toBe(true);
           expect(lines.every((line) => Number.isInteger(line.amt))).toBe(true);

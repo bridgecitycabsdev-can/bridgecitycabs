@@ -30,8 +30,12 @@ model Branch {
   vehicles        Vehicle[]
   drivers         Driver[]
   fareRules       FareRule[]
-  bookings        Booking[]
-  closingPeriods  ClosingPeriod[]
+  bookings           Booking[]
+  closingPeriods     ClosingPeriod[]
+  corporateAccounts  CorporateAccount[]
+  invoices           Invoice[]
+  /// Monotonic counter for INV-{year}-{seq} numbering within the branch.
+  invoiceSeq         Int       @default(0)
 }
 
 model Role {
@@ -393,15 +397,33 @@ enum AccountType {
   GST_PAYABLE
   PAYMENT_CLEARING
   PASSENGER_WALLET
+  ACCOUNTS_RECEIVABLE
+  BANK_CLEARING
 }
 
 enum LedgerKind {
   TRIP_CASH
   TRIP_CARD
+  TRIP_ACCOUNT
+  INVOICE_PAYMENT
   ADJUSTMENT
   REVERSAL
   LEASE_DEDUCTION
   SETTLEMENT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum BillingCycle {
+  WEEKLY
+  MONTHLY
 }
 
 /// Why this Payment row exists (card auth/capture vs overage vs refund).
@@ -509,7 +531,15 @@ model Booking {
   vanOnly              Boolean       @default(false)
   ladyDriverOnly       Boolean       @default(false)
   zone                 FareZone      @default(INSIDE_TOWN)
-  corporateAccountId   String? // relation added when corporate accounts are built
+  corporateAccountId   String?
+  corporateAccount     CorporateAccount? @relation(fields: [corporateAccountId], references: [id])
+  corporateContactId   String?
+  corporateContact     CorporateAccountContact? @relation(fields: [corporateContactId], references: [id])
+  /// Set when the booking is attached to an invoice (at most one, forever).
+  invoicedAt           DateTime?
+  invoiceId            String?
+  invoice              Invoice?      @relation(fields: [invoiceId], references: [id])
+  invoiceLine          InvoiceLine?
   scheduledAt          DateTime? // UTC; null means "now"
   distanceMeters       Int
   durationSeconds      Int
@@ -566,6 +596,8 @@ model Booking {
   @@index([passengerId, createdAt])
   @@index([scheduledAt])
   @@index([stripePaymentIntentId])
+  @@index([corporateAccountId])
+  @@index([invoiceId])
 }
 
 /// One collection attempt. Amounts are always written by the server; the client
@@ -749,6 +781,99 @@ model ClosingLine {
   closingCents    Int
 
   @@index([closingPeriodId])
+}
+
+/// Franchise / multi-location parent that receives one consolidated invoice.
+model CorporateAccountGroup {
+  id        String             @id @default(uuid())
+  name      String
+  active    Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  accounts  CorporateAccount[]
+  invoices  Invoice[]
+}
+
+/// Charge-account customer billed on a cycle (legacy "search account").
+model CorporateAccount {
+  id               String                    @id @default(uuid())
+  legacyId         Int?                      @unique
+  branchId         String
+  branch           Branch                    @relation(fields: [branchId], references: [id])
+  groupId          String?
+  group            CorporateAccountGroup?    @relation(fields: [groupId], references: [id])
+  name             String
+  billingEmail     String?
+  billingAddress   String?
+  gstNumber        String?
+  billingCycle     BillingCycle              @default(MONTHLY)
+  creditLimitCents Int                       @default(0)
+  active           Boolean                   @default(true)
+  notes            String?
+  createdById      String?
+  createdAt        DateTime                  @default(now())
+  contacts         CorporateAccountContact[]
+  bookings         Booking[]
+  invoices         Invoice[]
+  invoiceLines     InvoiceLine[]
+
+  @@index([branchId, active])
+}
+
+model CorporateAccountContact {
+  id        String           @id @default(uuid())
+  accountId String
+  account   CorporateAccount @relation(fields: [accountId], references: [id])
+  name      String
+  phone     String
+  email     String?
+  active    Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  bookings  Booking[]
+
+  @@index([accountId])
+  @@index([phone])
+}
+
+model Invoice {
+  id                 String                 @id @default(uuid())
+  number             String                 @unique // INV-2026-0001
+  branchId           String
+  branch             Branch                 @relation(fields: [branchId], references: [id])
+  corporateAccountId String?
+  corporateAccount   CorporateAccount?      @relation(fields: [corporateAccountId], references: [id])
+  groupId            String?
+  group              CorporateAccountGroup? @relation(fields: [groupId], references: [id])
+  periodStart        DateTime
+  periodEnd          DateTime
+  subtotalCents      Int
+  taxCents           Int
+  totalCents         Int
+  paidCents          Int                    @default(0)
+  status             InvoiceStatus          @default(DRAFT)
+  dueAt              DateTime?
+  generatedById      String?
+  createdAt          DateTime               @default(now())
+  lines              InvoiceLine[]
+  bookings           Booking[]
+
+  @@index([branchId, status])
+  @@index([corporateAccountId])
+  @@index([groupId])
+}
+
+model InvoiceLine {
+  id                 String           @id @default(uuid())
+  invoiceId          String
+  invoice            Invoice          @relation(fields: [invoiceId], references: [id])
+  bookingId          String           @unique
+  booking            Booking          @relation(fields: [bookingId], references: [id])
+  corporateAccountId String
+  corporateAccount   CorporateAccount @relation(fields: [corporateAccountId], references: [id])
+  subtotalCents      Int
+  taxCents           Int
+  totalCents         Int
+
+  @@index([invoiceId])
 }
 
 model BookingStop {

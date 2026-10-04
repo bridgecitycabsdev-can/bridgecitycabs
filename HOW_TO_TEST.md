@@ -240,3 +240,62 @@ Assume Day 9 (`money_*`) and Day 10 (`card_payments_*`) migrations are applied, 
 - [ ] All twelve tests pass
 - [ ] No Stripe secret key or webhook secret in git; only test-mode keys used
 - [ ] Committed as `feat(api): stripe card payments, webhooks, lease deductions, settlement and weekly closing`
+
+## Corporate accounts & invoicing (Day 11)
+
+```bash
+docker compose up -d && pnpm --filter api start:dev
+```
+
+Non-prod seed includes **Prairie Hotel** on the Lethbridge branch (credit limit $250) with two contacts for New Job search.
+
+```bash
+# create an account with a small limit, a contact, then try to overshoot it
+curl -s -X POST localhost:3000/api/v1/corporate-accounts -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"name":"Prairie Hotel","creditLimitCents":10000,"billingCycle":"MONTHLY"}'
+
+curl -s -X POST localhost:3000/api/v1/bookings -H "Authorization: Bearer $TOKEN" \
+  -H "Idempotency-Key: $(uuidgen)" -H "Content-Type: application/json" \
+  -d '{"paymentMethod":"ACCOUNT","corporateAccountId":"<id>", ...stops, vehicleTypeId}'
+# run two or three of these until the limit is hit, confirm CREDIT_LIMIT_EXCEEDED on the one that tips it over
+
+# complete one via the simulator's --complete flag (Day 9), then check its balance
+curl -s localhost:3000/api/v1/corporate-accounts/<id>/balance -H "Authorization: Bearer $TOKEN"
+
+# generate an invoice for the period covering today
+curl -s -X POST localhost:3000/api/v1/finance/invoices/generate -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"corporateAccountId":"<id>","periodStart":"2026-10-01","periodEnd":"2026-11-01"}'
+
+curl -s -X POST localhost:3000/api/v1/finance/invoices/<invoiceId>/record-payment -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d '{"amountCents":5000,"method":"E_TRANSFER","reference":"INTERAC-123"}'
+```
+
+Confirm AR dropped by exactly the payment, and the global ledger still balances:
+
+```sql
+select sum("amountCents") from "LedgerEntry" where "accountId" = (
+  select id from "FinancialAccount" where key = 'ACCOUNTS_RECEIVABLE:<accountId>'
+);
+select sum("amountCents") from "LedgerEntry";   -- always 0
+
+-- this must ERROR (invoice totals trigger)
+insert into "InvoiceLine" (id, "invoiceId", "bookingId", "corporateAccountId", "subtotalCents", "taxCents", "totalCents")
+  values (gen_random_uuid(), '<invoiceId>', '<some-other-booking>', '<accountId>', 100, 5, 105);
+```
+
+```bash
+pnpm --filter api exec vitest run src/corporate/day11.spec.ts
+```
+
+## Done when (Day 11)
+
+- [ ] `corporate_accounts` and `corporate_guards` migrations applied, including the invoice-totals trigger
+- [ ] Credit limit check blocks over-limit bookings; override path is permission-gated and audited
+- [ ] Account trips post and close immediately on completion; driver paid regardless of invoice status
+- [ ] Account, contact, and group CRUD and search work, branch-scoped
+- [ ] Invoice generation is idempotent against double-invoicing a booking (single-account and consolidated)
+- [ ] Invoice totals always match their lines, enforced at the database
+- [ ] Partial and full payments correctly reduce AR and never touch revenue or GST accounts
+- [ ] Overdue sweep runs and flips status correctly
+- [ ] All fourteen tests pass (`src/corporate/day11.spec.ts`)
+- [ ] Committed as `feat(api): corporate accounts, contacts, groups, invoicing and account billing`

@@ -9,3 +9,8 @@ export function branchRoom(branchId: string) {
 export function passengerRoom(userId: string) {
   return `passenger:${userId}`;
 }
+
+/** Cross-namespace room for generic in-app notifications (any authenticated role). */
+export function userRoom(userId: string) {
+  return `user:${userId}`;
+}

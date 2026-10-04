@@ -115,6 +115,7 @@ describe('BookingsService tracking id', () => {
       { get: vi.fn() } as never,
       { releaseAuthorized: vi.fn(async () => undefined) } as never,
     { checkCreditLimit: vi.fn(), getAccountReceivableBalance: vi.fn() } as never,
+      { releaseIfAny: vi.fn(), redeem: vi.fn() } as never,
     );
     return {
       service,

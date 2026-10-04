@@ -29,6 +29,7 @@ import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { CardHoldService } from '../payments/card-hold.service.js';
 import { PaymentProvidersService } from '../payments/payment-providers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PromosService } from '../promos/promos.service.js';
 import type {
   PassengerCancelBookingDto,
   PassengerCreateBookingDto,
@@ -65,6 +66,7 @@ export class PassengerBookingsService {
     @Inject(DISTANCE_SERVICE) private readonly distance: DistanceService,
     private readonly paymentProviders: PaymentProvidersService,
     private readonly cardHolds: CardHoldService,
+    private readonly promos: PromosService,
   ) {}
 
   async create(dto: PassengerCreateBookingDto, user: AuthUser) {
@@ -155,6 +157,8 @@ export class PassengerBookingsService {
         seconds: accepted.durationS,
         subtotalCents: accepted.subtotalCents,
         taxCents: accepted.taxCents,
+        promoCodeId: accepted.promoCodeId ?? null,
+        promoDiscountCents: accepted.discountCents ?? 0,
         cardAuth,
       });
       providerRefToCancel = undefined;
@@ -254,6 +258,7 @@ export class PassengerBookingsService {
         where: { bookingId: booking.id, endedAt: null },
         data: { endedAt: new Date(), endReason: 'BOOKING_CANCELLED' },
       });
+      await this.promos.releaseIfAny(tx, booking.id);
       return this.state.transition(
         booking.id,
         'CANCELLED',
@@ -387,6 +392,8 @@ export class PassengerBookingsService {
     seconds: number;
     subtotalCents: number;
     taxCents: number;
+    promoCodeId: string | null;
+    promoDiscountCents: number;
     cardAuth?: CardAuth;
   }) {
     for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -423,6 +430,8 @@ export class PassengerBookingsService {
               durationSeconds: input.seconds,
               quotedFareCents: input.subtotalCents,
               quotedTaxCents: input.taxCents,
+              promoCodeId: input.promoCodeId,
+              promoDiscountCents: input.promoDiscountCents,
               gstRateBps: input.gstRateBps,
               paymentMethod: input.dto.paymentMethod,
               paymentMethodId: input.cardAuth?.paymentMethodId,
@@ -442,6 +451,14 @@ export class PassengerBookingsService {
               },
             },
           });
+          if (input.promoCodeId) {
+            await this.promos.redeem(tx, {
+              promoCodeId: input.promoCodeId,
+              passengerId: input.passengerId,
+              bookingId: created.id,
+              discountCents: input.promoDiscountCents,
+            });
+          }
           if (input.cardAuth) {
             await tx.payment.create({
               data: {

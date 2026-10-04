@@ -5,10 +5,13 @@ import {
   Injectable,
   InternalServerErrorException,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { FareZone } from '@prisma/client';
+import type { FareZone, PromoCode } from '@prisma/client';
+import { ApiCode } from '../common/api-code.js';
 import type { AuthUser } from '../common/auth-user.js';
+import { applyPromo } from '../promos/apply-promo.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { calcFare } from './calc-fare.js';
 import {
@@ -36,6 +39,8 @@ export type FareQuoteOption = {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  discountCents: number;
+  promoCodeId: string | null;
   etaMinutes: null;
   quoteToken: string;
   expiresAt: string;
@@ -142,8 +147,34 @@ export class FaresService {
       orderBy: { vehicleType: { name: 'asc' } },
     });
 
+    // Promo codes are a passenger-app feature; staff /fares/quotes ignores them.
+    const promo =
+      user.role === 'passenger' && dto.promoCode?.trim()
+        ? await this.requireEligiblePromo(
+            dto.promoCode.trim().toUpperCase(),
+            branch.id,
+            // Eligibility vs minSubtotal is checked per option below.
+            null,
+          )
+        : null;
+
     const options = rules.map((rule) => {
       const fare = calcFare(rule, trip.meters, trip.seconds, branch.gstRateBps);
+      let subtotalCents = fare.subtotalCents;
+      let taxCents = fare.taxCents;
+      let totalCents = fare.totalCents;
+      let discountCents = 0;
+      let promoCodeId: string | null = null;
+
+      if (promo && fare.subtotalCents >= promo.minSubtotalCents) {
+        const applied = applyPromo(fare.subtotalCents, promo);
+        discountCents = applied.discountCents;
+        subtotalCents = applied.netSubtotalCents;
+        taxCents = Math.round((subtotalCents * branch.gstRateBps) / 10000);
+        totalCents = subtotalCents + taxCents;
+        promoCodeId = promo.id;
+      }
+
       const payload: QuotePayload = {
         branchId: branch.id,
         vehicleTypeId: rule.vehicleTypeId,
@@ -151,18 +182,22 @@ export class FaresService {
         stopsHash: hash,
         distanceM: trip.meters,
         durationS: trip.seconds,
-        subtotalCents: fare.subtotalCents,
-        taxCents: fare.taxCents,
-        totalCents: fare.totalCents,
+        subtotalCents,
+        taxCents,
+        totalCents,
         source,
         exp,
+        discountCents,
+        promoCodeId,
       };
       return {
         vehicleTypeId: rule.vehicleTypeId,
         name: rule.vehicleType.name,
-        subtotalCents: fare.subtotalCents,
-        taxCents: fare.taxCents,
-        totalCents: fare.totalCents,
+        subtotalCents,
+        taxCents,
+        totalCents,
+        discountCents,
+        promoCodeId,
         etaMinutes: null,
         quoteToken: signQuote(payload, secret),
         expiresAt: new Date(exp * 1000).toISOString(),
@@ -176,6 +211,37 @@ export class FaresService {
       zone,
       options,
     };
+  }
+
+  /**
+   * Validates a promo for quote-time eligibility (active, branch, window, total
+   * cap). Pass `minSubtotalCents` to also enforce the minimum fare floor, or
+   * null to defer that check to the caller per option.
+   */
+  async requireEligiblePromo(
+    code: string,
+    branchId: string,
+    minSubtotalCents: number | null,
+    now = new Date(),
+  ): Promise<PromoCode> {
+    const promo = await this.prisma.promoCode.findUnique({
+      where: { code },
+    });
+    const eligible =
+      promo &&
+      promo.active &&
+      (!promo.branchId || promo.branchId === branchId) &&
+      (!promo.startAt || promo.startAt <= now) &&
+      (!promo.endAt || promo.endAt >= now) &&
+      (minSubtotalCents == null || minSubtotalCents >= promo.minSubtotalCents) &&
+      (promo.usageLimitTotal == null ||
+        promo.redeemedCount < promo.usageLimitTotal);
+    if (!eligible || !promo) {
+      throw new UnprocessableEntityException({
+        code: ApiCode.PROMO_NOT_ELIGIBLE,
+      });
+    }
+    return promo;
   }
 
   acceptQuote(

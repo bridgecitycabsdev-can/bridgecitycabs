@@ -161,6 +161,10 @@ function harness() {
       key === 'AUTH_BUFFER_BPS' ? '2000' : undefined,
     ),
   } as unknown as ConfigService;
+  const promos = {
+    redeem: vi.fn(async () => undefined),
+    releaseIfAny: vi.fn(async () => undefined),
+  };
   const service = new PassengerBookingsService(
     prisma as never,
     state as never,
@@ -171,6 +175,7 @@ function harness() {
     distance as never,
     paymentProviders as never,
     cardHolds as never,
+    promos as never,
   );
   return {
     service,

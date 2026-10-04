@@ -10,11 +10,15 @@ export type QuotePayload = {
   stopsHash: string;
   distanceM: number;
   durationS: number;
+  /** Pre-GST subtotal; already promo-discounted when promoCodeId is set. */
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
   source: DistanceSource;
   exp: number;
+  /** Discount baked into subtotalCents (0 when no promo). */
+  discountCents?: number;
+  promoCodeId?: string | null;
 };
 
 export type QuoteCheck = {
@@ -76,19 +80,37 @@ export function verifyQuote(
 
 function isPayload(value: unknown): value is QuotePayload {
   if (!isRecord(value)) return false;
-  return (
-    typeof value.branchId === 'string' &&
-    typeof value.vehicleTypeId === 'string' &&
-    (value.zone === 'INSIDE_TOWN' || value.zone === 'OUT_OF_TOWN') &&
-    typeof value.stopsHash === 'string' &&
-    Number.isInteger(value.distanceM) &&
-    Number.isInteger(value.durationS) &&
-    Number.isInteger(value.subtotalCents) &&
-    Number.isInteger(value.taxCents) &&
-    Number.isInteger(value.totalCents) &&
-    (value.source === 'ROUTES' || value.source === 'ESTIMATE') &&
-    Number.isInteger(value.exp)
-  );
+  if (
+    !(
+      typeof value.branchId === 'string' &&
+      typeof value.vehicleTypeId === 'string' &&
+      (value.zone === 'INSIDE_TOWN' || value.zone === 'OUT_OF_TOWN') &&
+      typeof value.stopsHash === 'string' &&
+      Number.isInteger(value.distanceM) &&
+      Number.isInteger(value.durationS) &&
+      Number.isInteger(value.subtotalCents) &&
+      Number.isInteger(value.taxCents) &&
+      Number.isInteger(value.totalCents) &&
+      (value.source === 'ROUTES' || value.source === 'ESTIMATE') &&
+      Number.isInteger(value.exp)
+    )
+  ) {
+    return false;
+  }
+  if (
+    value.discountCents !== undefined &&
+    !Number.isInteger(value.discountCents)
+  ) {
+    return false;
+  }
+  if (
+    value.promoCodeId !== undefined &&
+    value.promoCodeId !== null &&
+    typeof value.promoCodeId !== 'string'
+  ) {
+    return false;
+  }
+  return true;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

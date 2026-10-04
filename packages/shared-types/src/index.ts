@@ -406,6 +406,8 @@ export const SOCKET_EVENTS = {
   offerResolved: 'offer:resolved',
   tripUpdate: 'trip:update',
   bookingUpdated: 'booking:updated',
+  notificationCreated: 'notification:created',
+  sosTriggered: 'sos:triggered',
 } as const;
 
 export type SocketEventName = (typeof SOCKET_EVENTS)[keyof typeof SOCKET_EVENTS];

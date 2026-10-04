@@ -5,7 +5,10 @@ import {
   ArrayMinSize,
   IsEnum,
   IsOptional,
+  IsString,
   IsUUID,
+  MaxLength,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { QuoteStopDto } from './quote-fare.dto.js';
@@ -19,6 +22,13 @@ export class QuoteBatchDto {
   @IsOptional()
   @IsEnum(FareZone)
   zone?: FareZone;
+
+  /** Passenger-app promo code. Ignored on staff /fares/quotes. */
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(40)
+  promoCode?: string;
 
   @ArrayMinSize(2)
   @ArrayMaxSize(10)

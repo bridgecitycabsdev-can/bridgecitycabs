@@ -41,6 +41,7 @@ import { LedgerService } from '../ledger/ledger.service.js';
 import { CardHoldService } from '../payments/card-hold.service.js';
 import { PaymentProvidersService } from '../payments/payment-providers.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { PromosService } from '../promos/promos.service.js';
 import { assertScheduledAt } from './booking-schedule.js';
 import {
   BookingStateService,
@@ -135,6 +136,7 @@ export class BookingsService {
     private readonly paymentProviders: PaymentProvidersService,
     private readonly cardHolds: CardHoldService,
     private readonly corporateCredit: CorporateCreditService,
+    private readonly promos: PromosService,
   ) {}
 
   async create(dto: CreateBookingDto, user: AuthUser) {
@@ -1188,6 +1190,7 @@ export class BookingsService {
     const result = await this.prisma.$transaction(async (tx) => {
       const booking = await this.requireBooking(tx, id, user);
       await this.closeAssignment(tx, booking.id, 'BOOKING_CANCELLED');
+      await this.promos.releaseIfAny(tx, booking.id);
       return this.state.transition(
         booking.id,
         'CANCELLED',
@@ -1283,6 +1286,7 @@ export class BookingsService {
         }
         if (dto.to === 'CANCELLED') {
           await this.closeAssignment(tx, booking.id, 'BOOKING_CANCELLED');
+          await this.promos.releaseIfAny(tx, booking.id);
         }
         return this.state.transition(
           booking.id,

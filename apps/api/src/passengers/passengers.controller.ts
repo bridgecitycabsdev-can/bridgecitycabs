@@ -15,6 +15,7 @@ import { CurrentUser } from '../common/current-user.decorator.js';
 import { PageQuery } from '../common/pagination.js';
 import { Roles } from '../common/roles.decorator.js';
 import { STAFF_ROLES } from '../common/staff-roles.js';
+import { RatingsService } from '../ratings/ratings.service.js';
 import { CreatePassengerDto } from './dto/create-passenger.dto.js';
 import { PassengerReasonDto } from './dto/passenger-reason.dto.js';
 import { UpdatePassengerDto } from './dto/update-passenger.dto.js';
@@ -23,7 +24,10 @@ import { PassengersService } from './passengers.service.js';
 @Controller('passengers')
 @Roles(...STAFF_ROLES)
 export class PassengersController {
-  constructor(private readonly passengers: PassengersService) {}
+  constructor(
+    private readonly passengers: PassengersService,
+    private readonly ratings: RatingsService,
+  ) {}
 
   @Post()
   create(@Body() dto: CreatePassengerDto) {
@@ -33,6 +37,14 @@ export class PassengersController {
   @Get()
   findAll(@Query() query: PageQuery) {
     return this.passengers.findAll(query);
+  }
+
+  @Get(':id/ratings')
+  listRatings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: PageQuery,
+  ) {
+    return this.ratings.listForPassenger(id, query);
   }
 
   @Get(':id')

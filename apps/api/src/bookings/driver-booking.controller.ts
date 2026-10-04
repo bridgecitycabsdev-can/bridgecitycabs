@@ -13,6 +13,8 @@ import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { RateBookingDto } from '../ratings/dto/rate-booking.dto.js';
+import { RatingsService } from '../ratings/ratings.service.js';
 import { BookingStateService } from './booking-state.service.js';
 import { BookingsService } from './bookings.service.js';
 import { ReleaseBookingDto } from './dto/release-booking.dto.js';
@@ -24,6 +26,7 @@ export class DriverBookingController {
     private readonly prisma: PrismaService,
     private readonly state: BookingStateService,
     private readonly bookings: BookingsService,
+    private readonly ratings: RatingsService,
   ) {}
 
   @Post(':id/arriving')
@@ -67,6 +70,21 @@ export class DriverBookingController {
     @Body() dto: ReleaseBookingDto,
   ) {
     return this.bookings.release(user, id, dto);
+  }
+
+  @Post(':id/rate-passenger')
+  @HttpCode(HttpStatus.OK)
+  async ratePassenger(
+    @CurrentUser() user: AuthUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: RateBookingDto,
+  ) {
+    const driver = await this.prisma.driver.findUnique({
+      where: { userId: user.userId },
+      select: { id: true },
+    });
+    if (!driver) throw new NotFoundException();
+    return this.ratings.ratePassenger(id, driver.id, dto.stars, dto.comment);
   }
 
   private async move(user: AuthUser, bookingId: string, to: BookingStatus) {

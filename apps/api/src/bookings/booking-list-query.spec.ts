@@ -23,6 +23,8 @@ describe('BookingsService.findAll zone', () => {
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+      { releaseIfAny: vi.fn(), redeem: vi.fn() } as never,
     );
     return { service, count };
   }

@@ -33,6 +33,11 @@ import { CorporateModule } from './corporate/corporate.module.js';
 import { LeaseModule } from './lease/lease.module.js';
 import { PaymentsModule } from './payments/payments.module.js';
 import { PassengersModule } from './passengers/passengers.module.js';
+import { PromosModule } from './promos/promos.module.js';
+import { RatingsModule } from './ratings/ratings.module.js';
+import { NotificationsModule } from './notifications/notifications.module.js';
+import { SupportModule } from './support/support.module.js';
+import { SosModule } from './sos/sos.module.js';
 import { PlacesModule } from './places/places.module.js';
 import { PushModule } from './push/push.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
@@ -77,6 +82,11 @@ const devBoardEnabled =
     LedgerModule,
     LeaseModule,
     CorporateModule,
+    PromosModule,
+    RatingsModule,
+    NotificationsModule,
+    SupportModule,
+    SosModule,
     FinanceModule,
     PaymentsModule,
     WebhooksModule,

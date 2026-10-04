@@ -5,6 +5,8 @@ import { FleetModule } from '../fleet/fleet.module.js';
 import { QueueModule } from '../jobs/queue.module.js';
 import { LedgerModule } from '../ledger/ledger.module.js';
 import { PaymentsModule } from '../payments/payments.module.js';
+import { PromosModule } from '../promos/promos.module.js';
+import { RatingsModule } from '../ratings/ratings.module.js';
 import { BookingStateService } from './booking-state.service.js';
 import { BookingsController } from './bookings.controller.js';
 import { BookingsService } from './bookings.service.js';
@@ -18,6 +20,8 @@ import { DriverBookingController } from './driver-booking.controller.js';
     LedgerModule,
     PaymentsModule,
     CorporateModule,
+    PromosModule,
+    RatingsModule,
   ],
   controllers: [BookingsController, DriverBookingController],
   providers: [BookingsService, BookingStateService],

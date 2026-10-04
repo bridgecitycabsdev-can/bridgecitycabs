@@ -33,6 +33,7 @@ for (const event of [
   SOCKET_EVENTS.bookingStatusChanged,
   SOCKET_EVENTS.offerCreated,
   SOCKET_EVENTS.offerResolved,
+  SOCKET_EVENTS.sosTriggered,
 ]) {
   socket.on(event, (payload) => {
     console.log(`${event} ${JSON.stringify(payload)}`);

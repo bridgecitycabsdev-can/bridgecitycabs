@@ -48,6 +48,13 @@ const PERMISSIONS = [
   'invoices.read',
   'invoices.write',
   'invoices.record_payment',
+  'promotions.manage',
+  'ratings.read',
+  'support.read',
+  'support.write',
+  'support.assign',
+  'sos.read',
+  'sos.respond',
 ] as const;
 
 const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
@@ -62,6 +69,13 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'corporate.read',
     'corporate.write',
     'corporate.override_credit_limit',
+    'promotions.manage',
+    'ratings.read',
+    'support.read',
+    'support.write',
+    'support.assign',
+    'sos.read',
+    'sos.respond',
   ],
   accounts_admin: [
     'bookings.read',
@@ -81,9 +95,24 @@ const ROLE_PERMISSIONS: Record<string, readonly string[]> = {
     'invoices.read',
     'invoices.write',
     'invoices.record_payment',
+    'support.read',
   ],
-  dispatcher: ['corporate.read'],
-  customer_care: ['corporate.read'],
+  dispatcher: [
+    'corporate.read',
+    'support.read',
+    'support.write',
+    'support.assign',
+    'sos.read',
+    'sos.respond',
+  ],
+  customer_care: [
+    'corporate.read',
+    'support.read',
+    'support.write',
+    'support.assign',
+    'sos.read',
+    'sos.respond',
+  ],
   driver: ['payments.confirm'],
 };
 
@@ -319,6 +348,7 @@ async function main() {
     }
     await seedDemo(branch.id, admin.id, driverRoleId, passengerRoleId, models);
     await seedDemoCorporateAccount(branch.id, admin.id);
+    await seedDemoPromoAndTicket(branch.id, admin.id);
   }
 }
 
@@ -668,6 +698,91 @@ async function upsertPassenger(
       lastName: person.lastName,
       phone: person.phone,
       email: person.email,
+    },
+  });
+}
+
+/** Non-prod only: WELCOME10 promo + one resolved sample ticket for Day 12 drills. */
+async function seedDemoPromoAndTicket(branchId: string, adminUserId: string) {
+  await prisma.promoCode.upsert({
+    where: { code: 'WELCOME10' },
+    update: {
+      branchId,
+      type: 'PERCENT',
+      valueBps: 1000,
+      valueCents: null,
+      maxDiscountCents: 500,
+      minSubtotalCents: 0,
+      usageLimitTotal: 100,
+      usageLimitPerPassenger: 1,
+      active: true,
+      startAt: null,
+      endAt: null,
+    },
+    create: {
+      code: 'WELCOME10',
+      branchId,
+      type: 'PERCENT',
+      valueBps: 1000,
+      maxDiscountCents: 500,
+      minSubtotalCents: 0,
+      usageLimitTotal: 100,
+      usageLimitPerPassenger: 1,
+      active: true,
+      createdById: adminUserId,
+    },
+  });
+
+  const subject = 'Seed: lost umbrella (resolved)';
+  const existing = await prisma.supportTicket.findFirst({
+    where: { branchId, subject },
+  });
+  if (existing) return;
+
+  const passenger = await prisma.user.findUnique({
+    where: { email: 'seed.passenger.amira@bridgecabs.local' },
+    select: { id: true },
+  });
+  const raisedByUserId = passenger?.id ?? adminUserId;
+
+  const rows = await prisma.$queryRaw<Array<{ ticketSeq: number }>>`
+    UPDATE "Branch"
+    SET "ticketSeq" = "ticketSeq" + 1
+    WHERE id = ${branchId}
+    RETURNING "ticketSeq"
+  `;
+  const seq = rows[0]?.ticketSeq;
+  if (seq == null) throw new Error('Failed to allocate seed ticket number');
+  const number = `TCK-${String(seq).padStart(5, '0')}`;
+
+  const ticket = await prisma.supportTicket.create({
+    data: {
+      number,
+      branchId,
+      raisedByType: 'PASSENGER',
+      raisedByUserId,
+      subject,
+      category: 'LOST_ITEM',
+      priority: 'MEDIUM',
+      status: 'RESOLVED',
+      assignedToId: adminUserId,
+      resolvedAt: new Date(),
+    },
+  });
+  await prisma.supportTicketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      senderType: 'PASSENGER',
+      senderUserId: raisedByUserId,
+      body: 'Left my umbrella in a sedan last Tuesday.',
+    },
+  });
+  await prisma.supportTicketMessage.create({
+    data: {
+      ticketId: ticket.id,
+      senderType: 'STAFF',
+      senderUserId: adminUserId,
+      body: 'Found and held at the Lethbridge office. Marking resolved.',
     },
   });
 }

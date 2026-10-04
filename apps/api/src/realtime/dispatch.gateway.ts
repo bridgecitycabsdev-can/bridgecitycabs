@@ -13,11 +13,13 @@ import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { watchAccessToken } from './access-token-watch.js';
 import { FleetBroadcaster } from './fleet-broadcaster.js';
-import { branchRoom } from './rooms.js';
+import { NotificationListener } from './notification.listener.js';
+import { branchRoom, userRoom } from './rooms.js';
 import { assertBroadcastSafe } from './broadcast-privacy.js';
 import { admitSocket, guardSocketEvents } from './socket-guard.js';
 import { SocketAuth } from './socket-auth.js';
 import { SocketLimits } from './socket-limits.js';
+import { SosListener } from './sos.listener.js';
 
 const DISPATCH_ROLES = [
   'super_admin',
@@ -36,11 +38,15 @@ export class DispatchGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly broadcaster: FleetBroadcaster,
     private readonly prisma: PrismaService,
     private readonly limits: SocketLimits,
+    private readonly notifications: NotificationListener,
+    private readonly sos: SosListener,
   ) {}
 
   afterInit(server: Namespace) {
     server.use(this.auth.middleware(DISPATCH_ROLES));
     this.broadcaster.bind(server);
+    this.notifications.bind(server);
+    this.sos.bind(server);
     guardSocketEvents(server, this.limits);
   }
 
@@ -55,6 +61,7 @@ export class DispatchGateway implements OnGatewayInit, OnGatewayConnection {
       return;
     }
     if (!(await admitSocket(socket, this.limits, this.logger))) return;
+    await socket.join(userRoom(user.userId));
     watchAccessToken(socket, (token) => this.auth.authenticate(token, DISPATCH_ROLES));
     if (user.role === 'super_admin' || !user.branchId) return;
     void this.joinBranch(socket, user.branchId);

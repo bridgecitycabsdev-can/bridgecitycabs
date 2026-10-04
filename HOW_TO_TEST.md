@@ -299,3 +299,56 @@ pnpm --filter api exec vitest run src/corporate/day11.spec.ts
 - [ ] Overdue sweep runs and flips status correctly
 - [ ] All fourteen tests pass (`src/corporate/day11.spec.ts`)
 - [ ] Committed as `feat(api): corporate accounts, contacts, groups, invoicing and account billing`
+
+## Promos, ratings, support & SOS (Day 12)
+
+```bash
+docker compose up -d && pnpm --filter api start:dev
+```
+
+Non-prod seed includes **WELCOME10** (10% off, $5 cap) and one sample resolved lost-item ticket on Lethbridge. Permissions: `promotions.manage`, `ratings.read`, `support.*`, `sos.*` (support/sos also on `customer_care` and `dispatcher`).
+
+```bash
+# promo
+curl -s -X POST localhost:3000/api/v1/promo-codes -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"code":"WELCOME10","type":"PERCENT","valueBps":1000,"maxDiscountCents":500,"usageLimitTotal":5}'
+curl -s -X POST localhost:3000/api/v1/passenger/fares/quotes -H "Authorization: Bearer $PTOKEN" \
+  -H "Content-Type: application/json" -d '{..., "promoCode":"WELCOME10"}' | jq '.options[0].discountCents'
+
+# rating, after closing a trip with the Day 9 simulator's --complete flag
+curl -s -X POST localhost:3000/api/v1/passenger/bookings/<id>/rate-driver -H "Authorization: Bearer $PTOKEN" \
+  -H "Content-Type: application/json" -d '{"stars":5,"comment":"Great ride"}'
+curl -s localhost:3000/api/v1/drivers/<driverId> -H "Authorization: Bearer $TOKEN" | jq '.ratingAvg,.ratingCount'
+
+# ticket
+curl -s -X POST localhost:3000/api/v1/support/tickets -H "Authorization: Bearer $PTOKEN" \
+  -H "Content-Type: application/json" -d '{"subject":"Left my bag","category":"LOST_ITEM","body":"In the back seat"}'
+curl -s localhost:3000/api/v1/support/tickets/pending-count -H "Authorization: Bearer $TOKEN"
+
+# sos, watch it arrive on the dispatch socket in another terminal
+pnpm --filter api exec tsx scripts/watch-dispatch.ts --branch <branchId>
+curl -s -X POST localhost:3000/api/v1/driver/sos -H "Authorization: Bearer $DTOKEN" \
+  -H "Content-Type: application/json" -d '{"lat":49.6935,"lng":-112.8418}'
+```
+
+Confirm a ticket message can't be edited:
+
+```sql
+update "SupportTicketMessage" set body = 'x';   -- must ERROR
+```
+
+```bash
+pnpm --filter api exec vitest run src/day12.spec.ts
+```
+
+## Done when (Day 12)
+
+- [ ] `promos_ratings_support_sos` and `support_guards` migrations applied
+- [ ] Promo discount flows through the existing quote-token mechanism with zero changes to Day 9/10/11 completion code
+- [ ] Usage limits hold under concurrent redemption; cancellation releases the slot
+- [ ] Ratings update the driver's average correctly under concurrent submissions and reject duplicates
+- [ ] Notifications are strictly user-scoped
+- [ ] Ticket numbering, assignment, status transitions, auto-reopen, and the pending-count endpoint all work
+- [ ] SOS reaches the dispatch socket immediately, never auto-resolves, and every transition is audited
+- [ ] All eleven tests pass (`src/day12.spec.ts`)
+- [ ] Committed as `feat(api): promotions, ratings, notifications, support tickets and sos`

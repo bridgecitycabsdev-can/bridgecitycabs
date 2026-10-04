@@ -118,6 +118,7 @@ describe('BookingsService ACCOUNT create', () => {
       { get: vi.fn() } as never,
       { releaseAuthorized: vi.fn() } as never,
       { checkCreditLimit: credit } as never,
+      { releaseIfAny: vi.fn(), redeem: vi.fn() } as never,
     );
     return { service, prisma, tx, credit };
   }
@@ -257,6 +258,7 @@ describe('BookingsService ACCOUNT complete', () => {
       { get: vi.fn() } as never,
       { releaseAuthorized: vi.fn() } as never,
       { checkCreditLimit: vi.fn() } as never,
+      { releaseIfAny: vi.fn(), redeem: vi.fn() } as never,
     );
 
     await expect(service.complete(driverUser, bookingId)).resolves.toMatchObject(

@@ -14,14 +14,16 @@ import type { AuthUser } from '../common/auth-user.js';
 import { CurrentUser } from '../common/current-user.decorator.js';
 import { Roles } from '../common/roles.decorator.js';
 import { STAFF_ROLES } from '../common/staff-roles.js';
-import { LocationHistoryQuery } from './dto/location-history-query.dto.js';
+import { PageQuery } from '../common/pagination.js';
 import { FleetStateService } from '../fleet/fleet-state.service.js';
 import { LocationHistoryService } from '../fleet/location-history.service.js';
+import { RatingsService } from '../ratings/ratings.service.js';
 import { DriversService } from './drivers.service.js';
 import { CreateDriverDto } from './dto/create-driver.dto.js';
 import { DriverOptionsQuery } from './dto/driver-options-query.dto.js';
 import { DriverQuery } from './dto/driver-query.dto.js';
 import { ForceOfflineDto } from './dto/force-offline.dto.js';
+import { LocationHistoryQuery } from './dto/location-history-query.dto.js';
 import { SuspendDriverDto } from './dto/suspend-driver.dto.js';
 import { UpdateDriverDto } from './dto/update-driver.dto.js';
 
@@ -32,6 +34,7 @@ export class DriversController {
     private readonly drivers: DriversService,
     private readonly fleet: FleetStateService,
     private readonly locations: LocationHistoryService,
+    private readonly ratings: RatingsService,
   ) {}
 
   @Get(':id/locations')
@@ -42,6 +45,15 @@ export class DriversController {
     @Query() query: LocationHistoryQuery,
   ) {
     return this.locations.read(user, id, query);
+  }
+
+  @Get(':id/ratings')
+  listRatings(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: PageQuery,
+  ) {
+    return this.ratings.listForDriver(id, query, user);
   }
 
   @Post()

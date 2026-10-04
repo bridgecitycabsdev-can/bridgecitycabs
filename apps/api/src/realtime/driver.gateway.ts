@@ -15,7 +15,8 @@ import { watchAccessToken } from './access-token-watch.js';
 import { DriverPublisher } from './driver-publisher.js';
 import { FleetBroadcaster } from './fleet-broadcaster.js';
 import { evaluateLocationPing, freshBucket } from './location-guard.js';
-import { driverRoom } from './rooms.js';
+import { NotificationListener } from './notification.listener.js';
+import { driverRoom, userRoom } from './rooms.js';
 import { admitSocket, guardSocketEvents } from './socket-guard.js';
 import { SocketAuth } from './socket-auth.js';
 import { SocketLimits } from './socket-limits.js';
@@ -37,11 +38,13 @@ export class DriverGateway implements OnGatewayInit, OnGatewayConnection, OnGate
     private readonly limits: SocketLimits,
     private readonly acks: OfferAckWaiter,
     private readonly locations: PassengerLocationRelay,
+    private readonly notifications: NotificationListener,
   ) {}
 
   afterInit(server: Namespace) {
     this.namespace = server;
     this.publisher.bind(server);
+    this.notifications.bind(server);
     server.use(this.auth.middleware(DRIVER_ROLES));
     guardSocketEvents(server, this.limits);
   }
@@ -123,6 +126,7 @@ export class DriverGateway implements OnGatewayInit, OnGatewayConnection, OnGate
         }
       }
       await socket.join(driverRoom(driverId));
+      await socket.join(userRoom(user.userId));
       socket.emit(
         SOCKET_EVENTS.driverState,
         await this.fleet.state({

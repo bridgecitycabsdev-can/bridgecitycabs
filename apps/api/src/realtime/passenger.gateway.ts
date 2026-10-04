@@ -4,7 +4,8 @@ import type { Namespace, Socket } from 'socket.io';
 import { PassengerBookingsService } from '../passengers/passenger-bookings.service.js';
 import { watchAccessToken } from './access-token-watch.js';
 import { PassengerPublisher } from './passenger-publisher.js';
-import { passengerRoom } from './rooms.js';
+import { NotificationListener } from './notification.listener.js';
+import { passengerRoom, userRoom } from './rooms.js';
 import { admitSocket, guardSocketEvents } from './socket-guard.js';
 import { SocketAuth } from './socket-auth.js';
 import { SocketLimits } from './socket-limits.js';
@@ -20,10 +21,12 @@ export class PassengerGateway implements OnGatewayInit, OnGatewayConnection {
     private readonly publisher: PassengerPublisher,
     private readonly limits: SocketLimits,
     private readonly bookings: PassengerBookingsService,
+    private readonly notifications: NotificationListener,
   ) {}
 
   afterInit(server: Namespace) {
     this.publisher.bind(server);
+    this.notifications.bind(server);
     server.use(this.auth.middleware(PASSENGER_ROLES));
     guardSocketEvents(server, this.limits);
   }
@@ -40,6 +43,7 @@ export class PassengerGateway implements OnGatewayInit, OnGatewayConnection {
     }
     if (!(await admitSocket(socket, this.limits, this.logger))) return;
     await socket.join(passengerRoom(user.userId));
+    await socket.join(userRoom(user.userId));
     watchAccessToken(socket, (token) => this.auth.authenticate(token, PASSENGER_ROLES));
     try {
       const snapshot = await this.bookings.activeForUser(user.userId);

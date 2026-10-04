@@ -34,8 +34,13 @@ model Branch {
   closingPeriods     ClosingPeriod[]
   corporateAccounts  CorporateAccount[]
   invoices           Invoice[]
+  promoCodes         PromoCode[]
+  supportTickets     SupportTicket[]
+  sosAlerts          SosAlert[]
   /// Monotonic counter for INV-{year}-{seq} numbering within the branch.
   invoiceSeq         Int       @default(0)
+  /// Monotonic counter for TCK-{seq} numbering within the branch.
+  ticketSeq          Int       @default(0)
 }
 
 model Role {
@@ -277,9 +282,12 @@ model Passenger {
   blockReason    String?
   blockedAt      DateTime?
   unblockReason  String?
+  ratingAvg      Decimal                   @default(0) @db.Decimal(3, 2)
+  ratingCount    Int                       @default(0)
   bookings       Booking[]
   paymentMethods PassengerPaymentMethod[]
   stripeCustomer StripeCustomer?
+  promoRedemptions PromoRedemption[]
 }
 
 model DocumentType {
@@ -426,6 +434,56 @@ enum BillingCycle {
   MONTHLY
 }
 
+enum PromoType {
+  PERCENT
+  FIXED
+}
+
+enum RaterType {
+  PASSENGER
+  DRIVER
+}
+
+enum TicketCategory {
+  COMPLAINT
+  LOST_ITEM
+  PAYMENT_ISSUE
+  APP_ISSUE
+  OTHER
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TicketSenderType {
+  PASSENGER
+  DRIVER
+  STAFF
+  SYSTEM
+}
+
+enum SosTriggerType {
+  DRIVER
+  PASSENGER
+}
+
+enum SosStatus {
+  TRIGGERED
+  ACKNOWLEDGED
+  RESOLVED
+  FALSE_ALARM
+}
+
 /// Why this Payment row exists (card auth/capture vs overage vs refund).
 enum PaymentPurpose {
   TRIP_AUTH_CAPTURE
@@ -544,9 +602,15 @@ model Booking {
   distanceMeters       Int
   durationSeconds      Int
   /// Pre-GST subtotal at quote/create time (`calcFare.subtotalCents`).
+  /// Already promo-discounted when a passenger quote used a code.
   quotedFareCents      Int
   /// GST on the quote (`calcFare.taxCents`).
   quotedTaxCents       Int
+  /// Promo applied at quote time (passenger app). Null when no code.
+  promoCodeId          String?
+  promoCode            PromoCode?    @relation(fields: [promoCodeId], references: [id])
+  /// Discount baked into quotedFareCents (audit/display).
+  promoDiscountCents   Int           @default(0)
   fixedFareCents       Int? // dispatcher override
   /// GST-inclusive total at completion.
   finalFareCents       Int?
@@ -590,6 +654,10 @@ model Booking {
   assignments          BookingAssignment[]
   offers               BookingOffer[]
   payments             Payment[]
+  promoRedemption      PromoRedemption?
+  ratings              BookingRating[]
+  supportTickets       SupportTicket[]
+  sosAlerts            SosAlert[]
 
   @@index([branchId, status, createdAt])
   @@index([driverId, status])
@@ -598,6 +666,7 @@ model Booking {
   @@index([stripePaymentIntentId])
   @@index([corporateAccountId])
   @@index([invoiceId])
+  @@index([promoCodeId])
 }
 
 /// One collection attempt. Amounts are always written by the server; the client
@@ -874,6 +943,130 @@ model InvoiceLine {
   totalCents         Int
 
   @@index([invoiceId])
+}
+
+model PromoCode {
+  id                     String            @id @default(uuid())
+  code                   String            @unique
+  branchId               String? // null = all branches
+  branch                 Branch?           @relation(fields: [branchId], references: [id])
+  type                   PromoType
+  valueBps               Int? // for PERCENT, basis points
+  valueCents             Int? // for FIXED
+  maxDiscountCents       Int?
+  minSubtotalCents       Int               @default(0)
+  usageLimitTotal        Int? // null = unlimited
+  usageLimitPerPassenger Int?              @default(1)
+  redeemedCount          Int               @default(0)
+  startAt                DateTime?
+  endAt                  DateTime?
+  active                 Boolean           @default(true)
+  createdById            String?
+  createdAt              DateTime          @default(now())
+  redemptions            PromoRedemption[]
+  bookings               Booking[]
+
+  @@index([branchId, active])
+}
+
+model PromoRedemption {
+  id            String     @id @default(uuid())
+  promoCodeId   String
+  promoCode     PromoCode  @relation(fields: [promoCodeId], references: [id])
+  passengerId   String
+  passenger     Passenger  @relation(fields: [passengerId], references: [id])
+  bookingId     String     @unique
+  booking       Booking    @relation(fields: [bookingId], references: [id])
+  discountCents Int
+  redeemedAt    DateTime   @default(now())
+  releasedAt    DateTime? // set if the booking was cancelled
+
+  @@index([promoCodeId, passengerId])
+}
+
+model BookingRating {
+  id          String    @id @default(uuid())
+  bookingId   String
+  booking     Booking   @relation(fields: [bookingId], references: [id])
+  raterType   RaterType
+  driverId    String? // set when raterType = PASSENGER
+  passengerId String? // set when raterType = DRIVER
+  stars       Int // 1 to 5
+  comment     String?
+  createdAt   DateTime  @default(now())
+
+  @@unique([bookingId, raterType])
+}
+
+model Notification {
+  id        String    @id @default(uuid())
+  userId    String
+  type      String // SUPPORT_REPLY | SOS_ACKNOWLEDGED | DOCUMENT_EXPIRING | ...
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model SupportTicket {
+  id             String                 @id @default(uuid())
+  number         String                 @unique // TCK-00001
+  branchId       String
+  branch         Branch                 @relation(fields: [branchId], references: [id])
+  raisedByType   TicketSenderType
+  raisedByUserId String
+  bookingId      String?
+  booking        Booking?               @relation(fields: [bookingId], references: [id])
+  subject        String
+  category       TicketCategory
+  priority       TicketPriority         @default(MEDIUM)
+  status         TicketStatus           @default(OPEN)
+  assignedToId   String?
+  createdAt      DateTime               @default(now())
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  messages       SupportTicketMessage[]
+
+  @@index([branchId, status])
+  @@index([assignedToId, status])
+  @@index([raisedByUserId])
+}
+
+model SupportTicketMessage {
+  id            String           @id @default(uuid())
+  ticketId      String
+  ticket        SupportTicket    @relation(fields: [ticketId], references: [id])
+  senderType    TicketSenderType
+  senderUserId  String?
+  body          String
+  attachmentKey String? // R2 object key
+  createdAt     DateTime         @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model SosAlert {
+  id                String         @id @default(uuid())
+  branchId          String
+  branch            Branch         @relation(fields: [branchId], references: [id])
+  bookingId         String?
+  booking           Booking?       @relation(fields: [bookingId], references: [id])
+  triggeredByType   SosTriggerType
+  triggeredByUserId String
+  lat               Float
+  lng               Float
+  status            SosStatus      @default(TRIGGERED)
+  acknowledgedById  String?
+  acknowledgedAt    DateTime?
+  resolvedById      String?
+  resolvedAt        DateTime?
+  resolutionNote    String?
+  createdAt         DateTime       @default(now())
+
+  @@index([branchId, status, createdAt])
 }
 
 model BookingStop {

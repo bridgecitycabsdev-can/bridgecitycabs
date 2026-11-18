@@ -1,92 +1,64 @@
 import 'package:bridgecabs_core/bridgecabs_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import 'money.dart';
 
+/// Fare summary for a finished trip. The router sends PAYMENT_PENDING and
+/// TRIP_COMPLETED bookings here until the API closes them.
 class ReceiptPage extends ConsumerWidget {
   const ReceiptPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final booking = ref.watch(activeBookingProvider).value;
-    if (booking == null || !booking.isReceipt) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    if (booking == null) {
+      return const Scaffold(body: Center(child: Text('No receipt yet')));
     }
-    final waitingOnCash = booking.status == 'PAYMENT_PENDING' ||
-        booking.status == 'TRIP_COMPLETED';
+    final driver = booking.driver;
+    final vehicle = driver?.vehicle;
     return Scaffold(
-      appBar: AppBar(title: const Text('Receipt')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                booking.trackingId,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                waitingOnCash ? 'Trip complete' : 'Payment received',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              if (waitingOnCash) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'Please pay cash to your driver.',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ],
-              const SizedBox(height: 32),
-              _Line(
-                label: 'Subtotal',
-                value: formatCadCents(booking.receiptSubtotalCents),
-              ),
-              _Line(
-                label: 'GST',
-                value: formatCadCents(booking.receiptTaxCents),
-              ),
-              const Divider(height: 32),
-              _Line(
-                label: 'Total',
-                value: formatCadCents(booking.receiptTotalCents),
-                bold: true,
-              ),
-              const Spacer(),
-              Text(
-                'Ratings come in a later update.',
-                style: Theme.of(context).textTheme.bodySmall,
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Line extends StatelessWidget {
-  const _Line({required this.label, required this.value, this.bold = false});
-
-  final String label;
-  final String value;
-  final bool bold;
-
-  @override
-  Widget build(BuildContext context) {
-    final style = bold
-        ? Theme.of(context).textTheme.titleMedium
-        : Theme.of(context).textTheme.bodyLarge;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      appBar: AppBar(title: Text(booking.trackingId)),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
         children: [
-          Text(label, style: style),
-          Text(value, style: style),
+          Text(
+            booking.status.replaceAll('_', ' '),
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 12),
+          Text('Pickup', style: Theme.of(context).textTheme.labelLarge),
+          Text(booking.pickupAddress ?? '—'),
+          const SizedBox(height: 12),
+          Text('Destination', style: Theme.of(context).textTheme.labelLarge),
+          Text(booking.dropoffAddress ?? '—'),
+          if (driver != null) ...[
+            const SizedBox(height: 12),
+            Text('Driver', style: Theme.of(context).textTheme.labelLarge),
+            Text(driver.firstName),
+            if (vehicle != null)
+              Text('${vehicle.colour ?? ''} ${vehicle.make} ${vehicle.model} · ${vehicle.plate}'.trim()),
+          ],
+          const SizedBox(height: 16),
+          Text('Subtotal ${formatCadCents(booking.receiptSubtotalCents)}'),
+          Text('GST ${formatCadCents(booking.receiptTaxCents)}'),
+          Text(
+            'Total ${formatCadCents(booking.receiptTotalCents)}',
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
+          if (booking.status == 'PAYMENT_PENDING')
+            const Padding(
+              padding: EdgeInsets.only(top: 12),
+              child: Text(
+                'The card charge is waiting for the bank. This screen updates when it succeeds.',
+              ),
+            ),
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: () => context.push('/rate-driver?bookingId=${booking.id}'),
+            child: const Text('Rate driver'),
+          ),
         ],
       ),
     );

@@ -1,22 +1,40 @@
 import 'package:bridgecabs_core/bridgecabs_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../di/app_providers.dart';
 import 'draft.dart';
 import 'place_field.dart';
 import 'places.dart';
+import 'presentation/bloc/search_bloc.dart';
 import '../tracking/map_placeholder.dart';
 
-class SearchPage extends ConsumerStatefulWidget {
+class SearchPage extends ConsumerWidget {
   const SearchPage({super.key});
 
   @override
-  ConsumerState<SearchPage> createState() => _SearchPageState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final places = ref.read(placesRepositoryProvider);
+    return BlocProvider(
+      create: (_) => SearchBloc(places),
+      child: _SearchView(places: places),
+    );
+  }
 }
 
-class _SearchPageState extends ConsumerState<SearchPage> {
+class _SearchView extends ConsumerStatefulWidget {
+  const _SearchView({required this.places});
+
+  final PlaceLookup places;
+
+  @override
+  ConsumerState<_SearchView> createState() => _SearchPageState();
+}
+
+class _SearchPageState extends ConsumerState<_SearchView> {
   late final PlaceSearchController _pickup;
   late final PlaceSearchController _dropoff;
   String? _error;
@@ -25,9 +43,8 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   @override
   void initState() {
     super.initState();
-    final dio = ref.read(apiClientProvider).dio;
-    _pickup = PlaceSearchController(dio);
-    _dropoff = PlaceSearchController(dio);
+    _pickup = PlaceSearchController(widget.places);
+    _dropoff = PlaceSearchController(widget.places);
     Future.microtask(_primePickup);
   }
 
@@ -58,26 +75,21 @@ class _SearchPageState extends ConsumerState<SearchPage> {
       if (resolved == LocationPermission.denied ||
           resolved == LocationPermission.deniedForever) {
         notifier.markPickupNeedsSearch();
+        notifier.setLocatingPickup(false);
         return;
       }
       final position = await Geolocator.getCurrentPosition();
-      final stop = await reverseGeocode(
-        ref.read(apiClientProvider).dio,
-        position.latitude,
-        position.longitude,
-      );
       if (!mounted) return;
-      if (stop == null) {
-        notifier.markPickupNeedsSearch();
-        return;
-      }
-      notifier.setPickup(stop);
-      _pickup.setText(stop.address);
+      context.read<SearchBloc>().add(
+        SearchReverseRequested(
+          lat: position.latitude,
+          lng: position.longitude,
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
       notifier.markPickupNeedsSearch();
-    } finally {
-      if (mounted) notifier.setLocatingPickup(false);
+      notifier.setLocatingPickup(false);
     }
   }
 
@@ -94,7 +106,19 @@ class _SearchPageState extends ConsumerState<SearchPage> {
   @override
   Widget build(BuildContext context) {
     final draft = ref.watch(bookingDraftProvider);
-    return Scaffold(
+    return BlocListener<SearchBloc, SearchState>(
+      listener: (context, state) {
+        final notifier = ref.read(bookingDraftProvider.notifier);
+        notifier.setLocatingPickup(state.locating);
+        final stop = state.stop;
+        if (stop != null) {
+          notifier.setPickup(stop);
+          _pickup.setText(stop.address);
+          return;
+        }
+        if (state.missed) notifier.markPickupNeedsSearch();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: const Text('Where to?'),
         actions: [
@@ -179,6 +203,7 @@ class _SearchPageState extends ConsumerState<SearchPage> {
             ),
           ),
         ],
+      ),
       ),
     );
   }

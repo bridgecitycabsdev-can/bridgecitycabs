@@ -4,7 +4,12 @@ node_modules/
 dist/
 !packages/design-tokens/dist/
 *.log
+*.tsbuildinfo
 loadtest/passenger-tokens.json
+
+# Flutter and build outputs
+**/build/
+.dart_tool/
 
 # Firebase Admin / Google Cloud service accounts (never commit)
 **/firebase-adminsdk*.json

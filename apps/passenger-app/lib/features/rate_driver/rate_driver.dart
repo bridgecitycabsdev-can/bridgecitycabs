@@ -1,0 +1,19 @@
+// Barrel export for the Rate Driver / Rate Your Trip feature
+export 'presentation/bloc/rate_driver_bloc.dart';
+export 'presentation/bloc/rate_driver_event.dart';
+export 'presentation/bloc/rate_driver_state.dart';
+export 'data/models/rate_driver_config.dart';
+export 'data/models/rate_driver_models.dart';
+export 'data/repositories/rate_driver_repository.dart';
+export 'presentation/pages/rate_driver_page.dart';
+export 'presentation/widgets/rating_already_rated_view.dart';
+export 'presentation/widgets/rating_comment_box.dart';
+export 'presentation/widgets/rating_driver_hero.dart';
+export 'presentation/widgets/rating_expired_view.dart';
+export 'presentation/widgets/rating_guarantee_card.dart';
+export 'presentation/widgets/rating_header_app_bar.dart';
+export 'presentation/widgets/rating_stars_bar.dart';
+export 'presentation/widgets/rating_success_view.dart';
+export 'presentation/widgets/rating_sync_banner.dart';
+export 'presentation/widgets/rating_tag_chips_selector.dart';
+export 'presentation/widgets/rating_trip_preview_card.dart';

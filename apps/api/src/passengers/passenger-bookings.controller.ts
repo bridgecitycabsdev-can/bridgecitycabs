@@ -53,6 +53,11 @@ export class PassengerBookingsController {
     return this.bookings.active(user);
   }
 
+  @Get('history')
+  history(@CurrentUser() user: AuthUser) {
+    return this.bookings.history(user);
+  }
+
   @Get(':id')
   get(@CurrentUser() user: AuthUser, @Param('id', ParseUUIDPipe) id: string) {
     return this.bookings.get(user, id);

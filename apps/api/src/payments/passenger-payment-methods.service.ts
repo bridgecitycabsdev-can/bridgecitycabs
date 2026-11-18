@@ -62,6 +62,15 @@ export class PassengerPaymentMethodsService {
     };
   }
 
+  cardConfig() {
+    const key = process.env.STRIPE_PUBLISHABLE_KEY?.trim() ?? '';
+    const publishableKey = key.startsWith('pk_') ? key : '';
+    return {
+      publishableKey,
+      cardPayments: this.stripe != null && publishableKey.length > 0,
+    };
+  }
+
   async list(user: AuthUser) {
     const passenger = await this.requirePassenger(user);
     const methods = await this.prisma.passengerPaymentMethod.findMany({

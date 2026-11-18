@@ -74,11 +74,27 @@ class PlaceDetails {
   }
 }
 
+/// Address search used by the booking screens. The data layer implements this.
+abstract class PlaceLookup {
+  Future<List<PlaceSuggestion>> autocomplete({
+    required String query,
+    required String session,
+    CancelToken? cancelToken,
+  });
+
+  Future<PlaceDetails?> details({
+    required String placeId,
+    required String session,
+  });
+
+  Future<PlaceStop?> reverse({required double lat, required double lng});
+}
+
 /// Debounced autocomplete with abort + session token, matching dispatch-web.
 class PlaceSearchController extends ChangeNotifier {
-  PlaceSearchController(this._dio);
+  PlaceSearchController(this._places);
 
-  final Dio _dio;
+  final PlaceLookup _places;
   String _text = '';
   List<PlaceSuggestion> _suggestions = const [];
   bool _open = false;
@@ -116,12 +132,8 @@ class PlaceSearchController extends ChangeNotifier {
     _open = false;
     _suggestions = const [];
     notifyListeners();
-    final response = await _dio.get<dynamic>(
-      '/places/$placeId',
-      queryParameters: {'session': session},
-    );
+    final details = await _places.details(placeId: placeId, session: session);
     _session = _newSession();
-    final details = PlaceDetails.tryParse(response.data);
     if (details != null) {
       _text = details.address;
       notifyListeners();
@@ -134,20 +146,12 @@ class PlaceSearchController extends ChangeNotifier {
     final token = CancelToken();
     _cancel = token;
     try {
-      final response = await _dio.get<dynamic>(
-        '/places/autocomplete',
-        queryParameters: {'q': query, 'session': _session},
+      final next = await _places.autocomplete(
+        query: query,
+        session: _session,
         cancelToken: token,
       );
       if (token.isCancelled) return;
-      final rows = response.data;
-      final next = <PlaceSuggestion>[];
-      if (rows is List) {
-        for (final row in rows) {
-          final item = PlaceSuggestion.tryParse(row);
-          if (item != null) next.add(item);
-        }
-      }
       _suggestions = next;
       _open = true;
       notifyListeners();
@@ -174,13 +178,10 @@ String _newSession() {
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }
 
-Future<PlaceStop?> reverseGeocode(Dio dio, double lat, double lng) async {
-  final response = await dio.get<dynamic>(
-    '/places/reverse',
-    queryParameters: {'lat': lat, 'lng': lng},
-  );
-  final json = jsonMap(response.data);
-  final address = json?['address'];
-  if (address is! String || address.isEmpty) return null;
-  return PlaceStop(address: address, lat: lat, lng: lng);
+Future<PlaceStop?> reverseGeocode(
+  PlaceLookup places,
+  double lat,
+  double lng,
+) {
+  return places.reverse(lat: lat, lng: lng);
 }

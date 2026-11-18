@@ -72,6 +72,7 @@ export function toPassengerBooking(
     finalSubtotalCents: row.finalSubtotalCents,
     finalTaxCents: row.finalTaxCents,
     finalFareCents: row.finalFareCents,
+    ...historyFields(row),
     notes: row.notes,
     passengerName: row.passengerName,
     vehicleType: { id: row.vehicleType.id, name: row.vehicleType.name },
@@ -84,6 +85,23 @@ export function toPassengerBooking(
     })),
     driver: driverCard(row),
   });
+}
+
+function historyFields(row: PassengerBookingRow) {
+  return {
+    ...(row.createdAt instanceof Date
+      ? { createdAt: row.createdAt.toISOString() }
+      : {}),
+    ...(typeof row.distanceMeters === 'number'
+      ? { distanceMeters: row.distanceMeters }
+      : {}),
+    ...(typeof row.durationSeconds === 'number'
+      ? { durationSeconds: row.durationSeconds }
+      : {}),
+    ...(typeof row.paymentMethod === 'string'
+      ? { paymentMethod: row.paymentMethod }
+      : {}),
+  };
 }
 
 function driverCard(row: PassengerBookingRow) {

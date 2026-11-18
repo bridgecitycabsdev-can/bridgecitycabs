@@ -1,0 +1,20 @@
+library confirm_trip;
+
+export 'presentation/bloc/confirm_trip_bloc.dart';
+export 'presentation/bloc/confirm_trip_event.dart';
+export 'presentation/bloc/confirm_trip_state.dart';
+export 'data/models/confirm_trip_config.dart';
+export 'data/models/fare_breakdown.dart';
+export 'data/models/payment_method_info.dart';
+export 'data/models/trip_booking_details.dart';
+export 'data/repositories/confirm_trip_repository.dart';
+export 'presentation/pages/confirm_trip_page.dart';
+export 'presentation/widgets/card_declined_banner.dart';
+export 'presentation/widgets/confirm_trip_header.dart';
+export 'presentation/widgets/confirm_trip_map.dart';
+export 'presentation/widgets/driver_notes_field.dart';
+export 'presentation/widgets/fare_breakdown_card.dart';
+export 'presentation/widgets/fare_changed_sheet.dart';
+export 'presentation/widgets/payment_method_selector.dart';
+export 'presentation/widgets/trip_route_summary_card.dart';
+export 'presentation/widgets/trip_vehicle_card.dart';

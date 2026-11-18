@@ -25,6 +25,11 @@ export class PassengerPaymentMethodsController {
     return this.methods.createSetupIntent(user);
   }
 
+  @Get('config')
+  config() {
+    return this.methods.cardConfig();
+  }
+
   @Get()
   list(@CurrentUser() user: AuthUser) {
     return this.methods.list(user);

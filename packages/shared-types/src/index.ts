@@ -305,6 +305,10 @@ export const passengerBookingSchema = z
     finalSubtotalCents: z.number().int().nullable().optional(),
     finalTaxCents: z.number().int().nullable().optional(),
     finalFareCents: z.number().int().nullable().optional(),
+    createdAt: z.iso.datetime().optional(),
+    distanceMeters: z.number().int().nonnegative().optional(),
+    durationSeconds: z.number().int().nonnegative().optional(),
+    paymentMethod: z.string().min(1).optional(),
     notes: z.string().nullable(),
     passengerName: z.string(),
     vehicleType: z

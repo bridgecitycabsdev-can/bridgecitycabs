@@ -2,7 +2,6 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:bridgecabs_core/bridgecabs_core.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 final bookingDraftProvider =
@@ -259,7 +258,10 @@ class BookingDraftController extends Notifier<BookingDraft> {
     state = const BookingDraft();
   }
 
-  Map<String, dynamic>? createPayload() {
+  Map<String, dynamic>? createPayload({
+    String paymentMethod = 'CASH',
+    String? paymentMethodId,
+  }) {
     final pickup = state.pickup;
     final dropoff = state.dropoff;
     final chosen = state.chosen;
@@ -271,7 +273,9 @@ class BookingDraftController extends Notifier<BookingDraft> {
       'vehicleTypeId': chosen.vehicleTypeId,
       'zone': quotes.zone,
       'quoteToken': chosen.quoteToken,
-      'paymentMethod': 'CASH',
+      'paymentMethod': paymentMethod,
+      if (paymentMethod == 'CARD' && paymentMethodId != null)
+        'paymentMethodId': paymentMethodId,
       'stops': [pickup.toStopJson(), dropoff.toStopJson()],
     };
   }
@@ -296,26 +300,4 @@ String _newKey() {
   final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
-}
-
-Future<FareQuotes> fetchQuotes(Dio dio, BookingDraft draft) async {
-  final pickup = draft.pickup;
-  final dropoff = draft.dropoff;
-  if (pickup == null || dropoff == null) {
-    throw StateError('Pickup and drop-off are required');
-  }
-  final response = await dio.post<dynamic>(
-    '/passenger/fares/quotes',
-    data: {
-      'stops': [pickup.toStopJson(), dropoff.toStopJson()],
-    },
-  );
-  final quotes = FareQuotes.tryParse(response.data);
-  if (quotes == null) {
-    throw DioException(
-      requestOptions: response.requestOptions,
-      message: 'Could not read fare quotes',
-    );
-  }
-  return quotes;
 }

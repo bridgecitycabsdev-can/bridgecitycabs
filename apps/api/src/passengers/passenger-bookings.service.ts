@@ -217,6 +217,22 @@ export class PassengerBookingsService {
     return toPassengerBooking(booking, await this.etaSeconds(booking));
   }
 
+  async history(user: AuthUser) {
+    const passenger = await this.requireAccount(user);
+    const rows = await this.prisma.booking.findMany({
+      where: {
+        passengerId: passenger.id,
+        status: { in: ['CLOSED', 'CANCELLED', 'PAYMENT_COMPLETED'] },
+      },
+      include: passengerBookingInclude,
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    });
+    return {
+      data: rows.map((row) => toPassengerBooking(row, null)),
+    };
+  }
+
   async get(user: AuthUser, id: string) {
     const passenger = await this.requireAccount(user);
     const booking = await this.prisma.booking.findFirst({

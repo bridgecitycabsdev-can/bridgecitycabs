@@ -1,24 +1,31 @@
 import 'package:bridgecabs_core/bridgecabs_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../di/app_providers.dart';
 import 'driver_location.dart';
+import 'presentation/bloc/tracking_bloc.dart';
 import 'trip_map.dart';
 
-class TrackingPage extends ConsumerStatefulWidget {
+class TrackingPage extends ConsumerWidget {
   const TrackingPage({super.key});
 
   @override
-  ConsumerState<TrackingPage> createState() => _TrackingPageState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    return BlocProvider(
+      create: (_) => TrackingBloc(ref.read(bookingRepositoryProvider)),
+      child: const _TrackingView(),
+    );
+  }
 }
 
-class _TrackingPageState extends ConsumerState<TrackingPage> {
-  bool _busy = false;
-  String? _error;
+class _TrackingView extends ConsumerWidget {
+  const _TrackingView();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final bookingAsync = ref.watch(activeBookingProvider);
     final location = ref.watch(driverLocationProvider);
 
@@ -31,7 +38,17 @@ class _TrackingPageState extends ConsumerState<TrackingPage> {
       }
     });
 
-    return bookingAsync.when(
+    return BlocConsumer<TrackingBloc, TrackingState>(
+      listener: (context, state) {
+        if (state.status != TrackingStatus.cancelled) return;
+        ref.read(activeBookingProvider.notifier).clear();
+        ref.read(driverLocationProvider.notifier).clear();
+        context.go('/home');
+      },
+      builder: (context, tripState) {
+        final busy = tripState.status == TrackingStatus.busy;
+        final error = tripState.error;
+        return bookingAsync.when(
       loading: () =>
           const Scaffold(body: Center(child: CircularProgressIndicator())),
       error: (error, _) => Scaffold(
@@ -65,7 +82,11 @@ class _TrackingPageState extends ConsumerState<TrackingPage> {
             actions: [
               if (booking.canCancel)
                 TextButton(
-                  onPressed: _busy ? null : () => _cancel(booking.id),
+                  onPressed: busy
+                      ? null
+                      : () => context.read<TrackingBloc>().add(
+                          TrackingCancelRequested(booking.id),
+                        ),
                   child: const Text('Cancel'),
                 ),
             ],
@@ -75,8 +96,7 @@ class _TrackingPageState extends ConsumerState<TrackingPage> {
               Expanded(
                 child: TripMap(
                   label: booking.trackingId,
-                  // Keep the placeholder until restricted SDK keys are present.
-                  usePlaceholder: true,
+                  usePlaceholder: false,
                   driverLat: location?.lat,
                   driverLng: location?.lng,
                   pickupLat: booking.stops
@@ -129,10 +149,10 @@ class _TrackingPageState extends ConsumerState<TrackingPage> {
                           'ETA ${(booking.etaSeconds! / 60).ceil()} min',
                         ),
                       ],
-                      if (_error != null) ...[
+                      if (error != null) ...[
                         const SizedBox(height: 8),
                         Text(
-                          _error!,
+                          error,
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.error,
                           ),
@@ -147,28 +167,7 @@ class _TrackingPageState extends ConsumerState<TrackingPage> {
         );
       },
     );
-  }
-
-  Future<void> _cancel(String bookingId) async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await ref
-          .read(apiClientProvider)
-          .dio
-          .post<dynamic>('/passenger/bookings/$bookingId/cancel', data: {});
-      if (!mounted) return;
-      ref.read(activeBookingProvider.notifier).clear();
-      ref.read(driverLocationProvider.notifier).clear();
-      context.go('/home');
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = errorMessage(error);
-      });
-    }
+      },
+    );
   }
 }

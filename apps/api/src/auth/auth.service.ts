@@ -126,7 +126,8 @@ export class AuthService {
     return OTP_ACCEPTED;
   }
 
-  async verifyOtp(rawPhone: string, code: string) {
+  /** Checks a code for [rawPhone] and removes it. Does not issue a session. */
+  async confirmOtp(rawPhone: string, code: string) {
     const phone = normalizePhone(rawPhone);
     const outcome = await this.redis.eval(
       VERIFY_OTP,
@@ -138,6 +139,11 @@ export class AuthService {
     if (outcome !== 'ok') {
       throw new UnauthorizedException(INVALID_CODE);
     }
+  }
+
+  async verifyOtp(rawPhone: string, code: string) {
+    await this.confirmOtp(rawPhone, code);
+    const phone = normalizePhone(rawPhone);
 
     const account = await this.findPhoneAccount(phone);
     const user = await this.accountForVerifiedPhone(phone, account);

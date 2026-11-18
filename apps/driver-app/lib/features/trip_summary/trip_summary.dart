@@ -1,0 +1,16 @@
+export 'bloc/driver_trip_summary_bloc.dart';
+export 'bloc/driver_trip_summary_event.dart';
+export 'bloc/driver_trip_summary_state.dart';
+export 'data/models/driver_edge_state.dart';
+export 'data/models/driver_fast_change_calc.dart';
+export 'data/models/driver_rate_passenger_model.dart';
+export 'data/models/driver_trip_summary_config.dart';
+export 'data/models/driver_trip_summary_model.dart';
+export 'data/models/driver_trip_summary_status.dart';
+export 'data/repositories/driver_trip_summary_repository.dart';
+export 'presentation/trip_summary_page.dart';
+export 'presentation/widgets/driver_edge_states_gallery.dart';
+export 'presentation/widgets/driver_rate_passenger_modal.dart';
+export 'presentation/widgets/driver_trip_summary_card_view.dart';
+export 'presentation/widgets/driver_trip_summary_cash_view.dart';
+export 'presentation/widgets/driver_trip_summary_qa_bar.dart';

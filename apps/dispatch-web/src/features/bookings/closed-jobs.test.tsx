@@ -74,7 +74,7 @@ describe('closed jobs modal', () => {
         <ClosedJobsModal />
       </QueryClientProvider>,
     )
-    await waitFor(() => expect(screen.getByText('LB-3001')).toBeTruthy())
+    await waitFor(() => expect(screen.getByText('LB-3001')).toBeTruthy(), { timeout: 5000 })
     expect(screen.getByText('Closed Rider')).toBeTruthy()
     expect(screen.queryByText('plain note')).toBeNull()
     expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy()

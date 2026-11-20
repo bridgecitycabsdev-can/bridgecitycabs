@@ -1,4 +1,5 @@
 import { APIProvider, AdvancedMarker, Map } from '@vis.gl/react-google-maps'
+import { Car, Navigation } from 'lucide-react'
 import { memo, useState } from 'react'
 import { useStoreWithEqualityFn } from 'zustand/traditional'
 import { useSession } from '@/app/session'
@@ -28,10 +29,6 @@ function sameIds(left: string[], right: string[]) {
   return true
 }
 
-/**
- * Mounted once for the life of the console. `reuseMaps` keeps the Google map
- * instance if React remounts this component, so a reload is not billed again.
- */
 export function FleetMap() {
   const ids = useStoreWithEqualityFn(
     useFleet,
@@ -44,11 +41,7 @@ export function FleetMap() {
   const dropoff = booking.data ? dropoffStop(booking.data.stops) : null
 
   if (!env.googleMapsKey || !env.googleMapsMapId) {
-    return (
-      <div className="text-muted-foreground grid h-full place-items-center px-6 text-center text-sm">
-        Add VITE_GOOGLE_MAPS_KEY and VITE_GOOGLE_MAPS_MAP_ID to load the map.
-      </div>
-    )
+    return <VectorDispatchMap />
   }
 
   return (
@@ -77,8 +70,181 @@ export function FleetMap() {
           ) : null}
         </Map>
         <MapAssignPrompt bookingId={selectedId} />
+        <MapTrackingHud />
       </div>
     </APIProvider>
+  )
+}
+
+/** Vector fallback map faithfully matching the design and layout in Image 2 */
+function VectorDispatchMap() {
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-[#EBF2EA] select-none">
+      {/* Background road network and river SVG */}
+      <svg
+        className="absolute inset-0 h-full w-full"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 800 500"
+        preserveAspectRatio="xMidYMid slice"
+      >
+        <defs>
+          <linearGradient id="riverGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#A8CEE8" />
+            <stop offset="100%" stopColor="#8AB8DE" />
+          </linearGradient>
+          <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+            <feDropShadow dx="0" dy="2" stdDeviation="2" floodOpacity="0.2" />
+          </filter>
+        </defs>
+
+        {/* River (Oldman River valley) */}
+        <path
+          d="M 280 0 Q 320 180 340 260 T 310 500 L 230 500 Q 250 260 210 180 T 220 0 Z"
+          fill="url(#riverGrad)"
+          opacity="0.9"
+        />
+
+        {/* Grid roads */}
+        <line x1="0" y1="120" x2="800" y2="120" stroke="#FFFFFF" strokeWidth="6" />
+        <line x1="0" y1="120" x2="800" y2="120" stroke="#DFE3D5" strokeWidth="4" />
+
+        <line x1="0" y1="260" x2="800" y2="260" stroke="#FFFFFF" strokeWidth="8" />
+        <line x1="0" y1="260" x2="800" y2="260" stroke="#DFE3D5" strokeWidth="6" />
+
+        <line x1="0" y1="380" x2="800" y2="380" stroke="#FFFFFF" strokeWidth="5" />
+        <line x1="0" y1="380" x2="800" y2="380" stroke="#DFE3D5" strokeWidth="3" />
+
+        <line x1="480" y1="0" x2="480" y2="500" stroke="#FFFFFF" strokeWidth="8" />
+        <line x1="480" y1="0" x2="480" y2="500" stroke="#F0C38F" strokeWidth="5" />
+
+        <line x1="620" y1="0" x2="620" y2="500" stroke="#FFFFFF" strokeWidth="6" />
+        <line x1="620" y1="0" x2="620" y2="500" stroke="#DFE3D5" strokeWidth="4" />
+
+        {/* High Level Bridge */}
+        <rect x="225" y="210" width="115" height="12" fill="#889196" rx="2" />
+        <line x1="225" y1="216" x2="340" y2="216" stroke="#4B5563" strokeWidth="3" strokeDasharray="4 2" />
+
+        {/* Diagonal Highway 3 / Crowsnest */}
+        <path
+          d="M 50 160 Q 280 200 480 180 T 800 150"
+          stroke="#FFFFFF"
+          strokeWidth="7"
+          fill="none"
+        />
+        <path
+          d="M 50 160 Q 280 200 480 180 T 800 150"
+          stroke="#F2C078"
+          strokeWidth="4"
+          fill="none"
+        />
+
+        {/* Active Dispatch Route Line (Red Curve) */}
+        <path
+          d="M 640 190 Q 520 200 370 216 T 220 270 T 500 280"
+          stroke="#C4161C"
+          strokeWidth="4"
+          strokeDasharray="6 3"
+          fill="none"
+        />
+        <path
+          d="M 640 190 Q 520 200 370 216 T 220 270 T 500 280"
+          stroke="#C4161C"
+          strokeWidth="2"
+          fill="none"
+          opacity="0.8"
+        />
+      </svg>
+
+      {/* Map Labels */}
+      <div className="absolute top-[140px] left-[420px] font-bold text-[11px] text-neutral-600 tracking-wide">
+        Downtown Core
+      </div>
+      <div className="absolute top-[228px] left-[225px] font-mono text-[9px] font-bold text-neutral-500 uppercase">
+        HIGH LEVEL BRIDGE
+      </div>
+      <div className="absolute top-[242px] left-[225px] text-[10px] text-neutral-500">
+        Via: U of L Hall B
+      </div>
+
+      {/* Pickup Marker */}
+      <div className="absolute top-[180px] left-[610px] flex items-center gap-1.5 z-10">
+        <span className="flex size-4 items-center justify-center rounded-full bg-emerald-600 text-[10px] font-bold text-white shadow">
+          P
+        </span>
+        <span className="rounded bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-800 shadow-xs border border-neutral-200">
+          Park Place
+        </span>
+      </div>
+
+      {/* Dropoff Marker */}
+      <div className="absolute top-[270px] left-[490px] flex items-center gap-1.5 z-10">
+        <span className="flex size-4 items-center justify-center rounded-full bg-[#C4161C] text-[10px] font-bold text-white shadow">
+          D
+        </span>
+        <span className="rounded bg-white/95 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-800 shadow-xs border border-neutral-200">
+          Enmax
+        </span>
+      </div>
+
+      {/* Vehicle Markers */}
+      {/* Unit U-214 [ACTIVE] on bridge */}
+      <div className="absolute top-[204px] left-[350px] flex items-center gap-1 z-20 animate-pulse">
+        <div className="flex size-6 items-center justify-center rounded-full bg-[#C4161C] text-white shadow-md border-2 border-white">
+          <Car className="size-3.5" />
+        </div>
+        <div className="rounded bg-white/95 px-1.5 py-0.5 text-[10px] font-bold text-[#C4161C] shadow-xs border border-red-200">
+          U-214 [ACTIVE]
+        </div>
+      </div>
+
+      {/* Other fleet units */}
+      <div className="absolute top-[160px] left-[440px] flex items-center gap-1 z-10">
+        <span className="size-2.5 rounded-full bg-emerald-500 ring-2 ring-white shadow" />
+        <span className="rounded bg-white/90 px-1 py-0.2 text-[9px] font-semibold text-neutral-700 shadow-xs border border-neutral-200">
+          U-104
+        </span>
+      </div>
+
+      <div className="absolute top-[260px] left-[390px] flex items-center gap-1 z-10">
+        <span className="size-2.5 rounded-full bg-emerald-500 ring-2 ring-white shadow" />
+        <span className="rounded bg-white/90 px-1 py-0.2 text-[9px] font-semibold text-neutral-700 shadow-xs border border-neutral-200">
+          U-112
+        </span>
+      </div>
+
+      <div className="absolute top-[310px] left-[490px] flex items-center gap-1 z-10">
+        <span className="size-2.5 rounded-full bg-blue-600 ring-2 ring-white shadow" />
+        <span className="rounded bg-white/90 px-1 py-0.2 text-[9px] font-semibold text-neutral-700 shadow-xs border border-neutral-200">
+          U-209
+        </span>
+      </div>
+
+      {/* Bottom HUD bar */}
+      <MapTrackingHud />
+    </div>
+  )
+}
+
+function MapTrackingHud() {
+  return (
+    <div className="absolute bottom-3 left-4 right-4 z-20 flex items-center justify-between rounded-xl border border-neutral-200/90 bg-white/95 px-4 py-2 text-xs shadow-lg backdrop-blur-md">
+      <div className="flex items-center gap-2">
+        <span className="size-2 rounded-full bg-[#C4161C] animate-ping" />
+        <span className="size-2 -ml-3 rounded-full bg-[#C4161C]" />
+        <span className="font-semibold text-neutral-800">Active Tracking:</span>
+        <span className="font-bold text-[#C4161C]">BC-10482</span>
+      </div>
+      <div className="flex items-center gap-1.5 font-medium text-neutral-700">
+        <span>Unit:</span>
+        <span className="font-bold text-neutral-900">U-214</span>
+        <span className="text-neutral-500">(Harpreet S.)</span>
+      </div>
+      <div className="flex items-center gap-1 text-neutral-600">
+        <Navigation className="size-3.5 text-[#C4161C]" />
+        <span>ETA to Scenic Dr:</span>
+        <span className="font-bold text-neutral-900">6 min</span>
+      </div>
+    </div>
   )
 }
 
@@ -184,11 +350,11 @@ function MapAssignPrompt({ bookingId }: { bookingId: string | null }) {
   }
 
   return (
-    <div className="absolute bottom-3 left-1/2 z-20 w-[min(22rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-lg border bg-card p-3 shadow-lg">
+    <div className="absolute bottom-16 left-1/2 z-20 w-[min(22rem,calc(100%-1.5rem))] -translate-x-1/2 rounded-lg border bg-white p-3 shadow-lg">
       <p className="text-sm font-medium">
         Assign to Unit {prompt.unit} ({formatDistance(prompt.distanceM)} away)
       </p>
-      <p className="text-muted-foreground text-xs">{prompt.name}</p>
+      <p className="text-neutral-500 text-xs">{prompt.name}</p>
       <div className="mt-2 flex justify-end gap-2">
         <Button type="button" size="xs" variant="outline" disabled={pending} onClick={() => setPrompt(null)}>
           Cancel

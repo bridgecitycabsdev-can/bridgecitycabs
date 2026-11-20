@@ -1,11 +1,15 @@
 /* Generated from packages/design-tokens/tokens.json. Do not edit. */
 :root {
-  --color-brand: #C0392B;
-  --color-success: #0F6E56;
-  --color-danger: #A32D2D;
+  --color-brand: #C4161C;
+  --color-primary: #C4161C;
+  --color-secondary: #9E1017;
+  --color-tertiary: #16A34A;
+  --color-neutral: #111111;
+  --color-success: #16A34A;
+  --color-danger: #C4161C;
   --color-bg: #F7F6F3;
   --color-surface: #FFFFFF;
-  --color-text: #1A1A1A;
+  --color-text: #111111;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 20px;
@@ -18,9 +22,13 @@
 }
 
 .dark {
-  --color-brand: #E0574A;
-  --color-success: #3FB596;
-  --color-danger: #E06666;
+  --color-brand: #E24A4F;
+  --color-primary: #E24A4F;
+  --color-secondary: #B54348;
+  --color-tertiary: #48B770;
+  --color-neutral: #F4F4F5;
+  --color-success: #48B770;
+  --color-danger: #E24A4F;
   --color-bg: #121212;
   --color-surface: #1C1C1E;
   --color-text: #F2F2F2;

@@ -7,9 +7,12 @@ export function FleetChips() {
   const setChip = useFleet((state) => state.setChip)
   const counts = chipCounts(Object.values(drivers))
 
+  // Filter out AWAY if 0 or keep core chips matching Image 2
+  const visibleChips = FLEET_CHIPS.filter((chip) => chip !== 'AWAY' || counts[chip] > 0)
+
   return (
-    <div className="bg-card/95 flex flex-wrap gap-1.5 rounded-lg border p-1.5 shadow-sm backdrop-blur-sm">
-      {FLEET_CHIPS.map((chip) => (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-neutral-200/90 bg-white/95 p-1.5 shadow-md shadow-neutral-200/50 backdrop-blur-md">
+      {visibleChips.map((chip) => (
         <ChipButton
           key={chip}
           chip={chip}
@@ -33,25 +36,34 @@ function ChipButton({
   pressed: boolean
   onSelect: (chip: FleetChip) => void
 }) {
-  const color = chip === 'ALL' ? 'var(--color-text)' : CHIP_COLOR[chip]
+  const color = chip === 'ALL' ? '#C4161C' : CHIP_COLOR[chip]
+
   return (
     <button
       type="button"
       aria-pressed={pressed}
       aria-label={`${chip} ${count}`}
-      className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold"
-      style={
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition-all cursor-pointer ${
         pressed
-          ? { background: color, borderColor: color, color: '#fff' }
-          : { background: 'transparent', borderColor: 'var(--border)', color: 'var(--color-text)' }
-      }
+          ? 'bg-[#C4161C] text-white shadow-xs'
+          : 'bg-neutral-100/80 text-neutral-700 hover:bg-neutral-200/80'
+      }`}
       onClick={() => onSelect(chip)}
     >
-      {chip === 'ALL' ? null : (
-        <span className="size-2 rounded-full" style={{ background: pressed ? '#fff' : color }} />
+      {chip !== 'ALL' && (
+        <span
+          className="size-2 rounded-full"
+          style={{ background: pressed ? '#ffffff' : color }}
+        />
       )}
-      {chip}
-      <span className={pressed ? 'opacity-90' : 'text-muted-foreground'}>{count}</span>
+      <span>{chip}</span>
+      <span
+        className={`font-mono text-[11px] ${
+          pressed ? 'text-white/90' : 'text-neutral-500'
+        }`}
+      >
+        {count}
+      </span>
     </button>
   )
 }

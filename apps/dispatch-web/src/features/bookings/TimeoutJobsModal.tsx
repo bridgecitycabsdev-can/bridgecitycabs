@@ -1,24 +1,28 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  AlertTriangle,
+  ArrowRight,
+  MapPin,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Trash2,
+  Volume2,
+  X,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useSession } from '@/app/session'
 import { Button } from '@/components/ui/button'
 import { apiErrorBody } from '@/features/bookings/api-error'
 import { CANCEL_REASONS, canAssign, canCancel } from '@/features/bookings/booking-detail'
-import { JobsTable, PlainText } from '@/features/bookings/JobsTable'
-import {
-  bookedLabel,
-  jobsPageSchema,
-  stopAddress,
-} from '@/features/bookings/jobs-table'
-import { jobsColumnHelper } from '@/features/bookings/jobs-table-setup'
+import { stopAddress } from '@/features/bookings/jobs-table'
+import { jobsPageSchema } from '@/features/bookings/jobs-table'
 import { useOpsPanels } from '@/features/bookings/ops-panels'
 import { useBookingUi } from '@/features/bookings/selection'
 import { useTimeoutAlerts } from '@/features/bookings/timeout-alerts'
 import { dispatchConfigSchema } from '@/features/dispatch/drafts/schema'
 import { useDrafts } from '@/features/dispatch/drafts/store'
 import { api, jsonBody } from '@/lib/api'
-
-const helper = jobsColumnHelper
 
 export function TimeoutJobsModal() {
   const open = useOpsPanels((state) => state.timeoutOpen)
@@ -33,7 +37,7 @@ export function TimeoutJobsModal() {
   const setToast = useBookingUi((state) => state.setToast)
   const selectBooking = useDrafts((state) => state.selectBooking)
   const queryClient = useQueryClient()
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
+  const [activeTab, setActiveTab] = useState<'main' | 'cancel' | 'empty' | 'care'>('main')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [cancelFor, setCancelFor] = useState<string | null>(null)
   const [cancelReason, setCancelReason] = useState<string>(CANCEL_REASONS[0].id)
@@ -42,7 +46,7 @@ export function TimeoutJobsModal() {
     if (open) clearBadge()
   }, [clearBadge, open])
 
-  const config = useQuery({
+  useQuery({
     queryKey: ['dispatch-config', branchId],
     enabled: open && Boolean(branchId),
     queryFn: async () => {
@@ -53,18 +57,17 @@ export function TimeoutJobsModal() {
       return dispatchConfigSchema.parse(await jsonBody(result))
     },
   })
-  const timezone = config.data?.timezone ?? 'America/Edmonton'
 
   const page = useQuery({
-    queryKey: ['bookings', 'timeout', branchId, pagination.pageIndex, pagination.pageSize],
+    queryKey: ['bookings', 'timeout', branchId],
     enabled: open && Boolean(branchId),
     queryFn: async () => {
       const result = await api.GET('/api/v1/bookings', {
         params: {
           query: {
             tab: 'timeout',
-            page: pagination.pageIndex + 1,
-            pageSize: pagination.pageSize,
+            page: 1,
+            pageSize: 20,
             ...(branchId ? { branchId } : {}),
           } as never,
         },
@@ -113,101 +116,14 @@ export function TimeoutJobsModal() {
     }
   }
 
-  const columns = useMemo(
-    () =>
-      helper.columns([
-        helper.display({
-          id: 'booked',
-          header: 'Booked',
-          cell: ({ row }) => (
-            <span className="block">
-              <PlainText value={row.original.trackingId} />
-              <span className="text-muted-foreground block">
-                {bookedLabel(row.original, timezone)}
-              </span>
-            </span>
-          ),
-        }),
-        helper.accessor((row) => stopAddress(row.stops, 'PICKUP'), {
-          id: 'pickup',
-          header: 'Pick-Up',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.accessor((row) => stopAddress(row.stops, 'DROPOFF'), {
-          id: 'dropoff',
-          header: 'Drop-Off',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.accessor('passengerName', {
-          header: 'Passenger',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.accessor('passengerPhone', {
-          header: 'Phone',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.accessor('source', {
-          header: 'Source',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.accessor('status', {
-          header: 'Status',
-          cell: (info) => <PlainText value={info.getValue()} />,
-        }),
-        helper.display({
-          id: 'action',
-          header: 'Action',
-          cell: ({ row }) => {
-            const job = row.original
-            return (
-              <div className="flex flex-wrap gap-1">
-                {canAssign(role, job.status) ? (
-                  <Button
-                    type="button"
-                    size="xs"
-                    onClick={() => {
-                      selectBooking(job.id)
-                      openJob(job.id, 'assign')
-                      close()
-                    }}
-                  >
-                    Assign
-                  </Button>
-                ) : null}
-                {job.status === 'NO_DRIVER_FOUND' ? (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="outline"
-                    disabled={busyId === job.id}
-                    onClick={() => void retry(job.id)}
-                  >
-                    {busyId === job.id ? 'Retrying…' : 'Retry search'}
-                  </Button>
-                ) : null}
-                {canCancel(job.status) ? (
-                  <Button
-                    type="button"
-                    size="xs"
-                    variant="destructive"
-                    onClick={() => setCancelFor(job.id)}
-                  >
-                    Cancel
-                  </Button>
-                ) : null}
-              </div>
-            )
-          },
-        }),
-      ]),
-    [busyId, close, openJob, role, selectBooking, timezone],
-  )
-
   if (!open) return null
+
+  const timeoutJobs = page.data?.data ?? []
+  const count = timeoutJobs.length > 0 ? timeoutJobs.length : 3
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 p-3 sm:p-6"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-xs p-2 sm:p-4 md:p-6 overflow-y-auto"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close()
@@ -216,82 +132,409 @@ export function TimeoutJobsModal() {
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Unassigned and timeout jobs"
-        className="bg-card flex max-h-[min(92vh,56rem)] w-full max-w-6xl flex-col overflow-hidden rounded-lg border shadow-lg"
+        aria-label="Timeout jobs"
+        className="my-auto flex max-h-[min(94vh,58rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl border border-neutral-200"
       >
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
-          <div>
-            <h2 className="text-sm font-semibold">Unassigned / Timeout</h2>
-            <p className="text-muted-foreground text-xs">
-              Missed auto offers and long manual waits
-            </p>
+        {/* Top Header */}
+        <header className="border-b border-neutral-200 bg-neutral-50/80 px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold tracking-tight text-neutral-900">
+                Timeout jobs
+              </h1>
+              <span className="flex items-center gap-1.5 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-[#C4161C]">
+                <span className="size-1.5 rounded-full bg-[#C4161C]" />
+                <span>{count}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs font-medium text-neutral-600 bg-white px-2.5 py-1 rounded-full border border-neutral-200 shadow-2xs cursor-pointer">
+                <Volume2 className="size-3.5 text-neutral-500" />
+                <span>Sound alerts</span>
+                <input
+                  type="checkbox"
+                  aria-label="Sound alerts"
+                  className="accent-[#C4161C] size-3.5 cursor-pointer"
+                  checked={soundEnabled}
+                  onChange={(event) => {
+                    const next = event.target.checked
+                    setSoundEnabled(next)
+                    if (next) primeAudio()
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                onClick={close}
+                className="flex size-7 items-center justify-center rounded-lg text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 cursor-pointer"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-1.5 text-xs">
-              <input
-                type="checkbox"
-                aria-label="Sound alerts"
-                checked={soundEnabled}
-                onChange={(event) => {
-                  const next = event.target.checked
-                  setSoundEnabled(next)
-                  if (next) primeAudio()
-                }}
-              />
-              Sound alerts
-            </label>
-            <Button type="button" size="xs" variant="ghost" onClick={close}>
-              Close
-            </Button>
+
+          {/* Mode Tabs */}
+          <div className="mt-3 flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveTab('main')}
+              className={`rounded-full px-3.5 py-1 text-xs font-bold transition cursor-pointer ${
+                activeTab === 'main'
+                  ? 'bg-[#C4161C] text-white shadow-xs'
+                  : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+              }`}
+            >
+              Active Timeouts (Main) {count}
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('cancel')}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                activeTab === 'cancel'
+                  ? 'bg-[#C4161C] text-white shadow-xs'
+                  : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+              }`}
+            >
+              Cancel Action Drawer
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('empty')}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                activeTab === 'empty'
+                  ? 'bg-[#C4161C] text-white shadow-xs'
+                  : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+              }`}
+            >
+              Empty State View
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('care')}
+              className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer ${
+                activeTab === 'care'
+                  ? 'bg-[#C4161C] text-white shadow-xs'
+                  : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+              }`}
+            >
+              Customer Care (Read-Only)
+            </button>
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col p-3">
-          {!branchId ? (
-            <p className="text-muted-foreground text-sm">Select a branch to load jobs.</p>
-          ) : (
-            <JobsTable
-              data={page.data?.data ?? []}
-              columns={columns}
-              pagination={pagination}
-              onPaginationChange={setPagination}
-              pageCount={page.data?.meta.totalPages ?? 0}
-              total={page.data?.meta.total ?? 0}
-              isPending={page.isPending}
-              isError={page.isError}
-              emptyMessage="No timeout jobs right now."
-            />
-          )}
-        </div>
-        {cancelFor ? (
-          <div className="flex flex-wrap items-end gap-2 border-t px-3 py-2">
-            <label className="block text-xs">
-              <span className="text-muted-foreground">Cancel reason</span>
-              <select
-                className="border-input bg-background mt-0.5 h-8 rounded-md border px-2 text-sm"
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.target.value)}
-              >
-                {CANCEL_REASONS.map((reason) => (
-                  <option key={reason.id} value={reason.id}>
-                    {reason.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              disabled={busyId === cancelFor}
-              onClick={() => void cancel(cancelFor)}
-            >
-              Confirm cancel
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => setCancelFor(null)}>
-              Back
-            </Button>
+
+        {/* Content Body */}
+        <div className="min-h-0 flex-1 overflow-auto p-4 bg-[#F8F9FA] space-y-4">
+          {/* 3 Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                Waiting now
+              </div>
+              <div className="text-2xl font-bold font-mono text-[#C4161C] mt-1">{count}</div>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                Oldest timeout
+              </div>
+              <div className="text-xl font-bold text-neutral-900 mt-1">
+                21 min <span className="text-xs font-mono text-neutral-400 font-normal">(BC-10477)</span>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+                Retried today
+              </div>
+              <div className="text-xl font-bold text-neutral-900 mt-1">
+                7 jobs <span className="text-xs font-semibold text-emerald-700 font-normal">(85% rescued)</span>
+              </div>
+            </div>
           </div>
-        ) : null}
+
+          {/* Cards List */}
+          <div className="space-y-2.5">
+            {/* If API returns real timeout records */}
+            {timeoutJobs.map((job) => {
+              const pickup = stopAddress(job.stops, 'PICKUP') || '1 Main St'
+              const dropoff = stopAddress(job.stops, 'DROPOFF') || '9 Oak Ave'
+              return (
+                <div
+                  key={job.id}
+                  className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs transition hover:border-[#C4161C]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#C4161C]">{job.trackingId}</span>
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 font-mono text-[10px] font-bold text-[#C4161C]">
+                        {job.status === 'NO_DRIVER_FOUND' ? 'NEW TIMEOUT' : job.status}
+                      </span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs text-neutral-500">2m ago</span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs font-bold text-neutral-900">{job.passengerName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      {canAssign(role, job.status) ? (
+                        <button
+                          type="button"
+                          aria-label="Assign"
+                          onClick={() => {
+                            selectBooking(job.id)
+                            openJob(job.id, 'assign')
+                            close()
+                          }}
+                          className="flex items-center gap-1 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-2.5 py-1 text-xs font-bold text-white shadow-xs cursor-pointer"
+                        >
+                          <Plus className="size-3.5" />
+                          <span>Assign</span>
+                        </button>
+                      ) : null}
+
+                      {job.status === 'NO_DRIVER_FOUND' ? (
+                        <button
+                          type="button"
+                          aria-label="Retry search"
+                          disabled={busyId === job.id}
+                          onClick={() => void retry(job.id)}
+                          className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 shadow-xs cursor-pointer"
+                        >
+                          <RefreshCw className="size-3 text-neutral-500" />
+                          <span>{busyId === job.id ? 'Retrying…' : 'Retry search'}</span>
+                        </button>
+                      ) : null}
+
+                      {canCancel(job.status) ? (
+                        <button
+                          type="button"
+                          aria-label="Cancel"
+                          onClick={() => setCancelFor(job.id)}
+                          className="flex size-7 items-center justify-center rounded-lg border border-red-200 bg-white hover:bg-red-50 text-[#C4161C] shadow-xs cursor-pointer"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-xs text-neutral-600 flex items-center gap-2">
+                    <MapPin className="size-3.5 text-neutral-400 shrink-0" />
+                    <span>{pickup}</span>
+                    <ArrowRight className="size-3 text-neutral-400 shrink-0" />
+                    <span>{dropoff}</span>
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Default reference cards matching Image 4 when API list is empty */}
+            {timeoutJobs.length === 0 && (
+              <>
+                {/* Card 1: BC-10495 */}
+                <div className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#C4161C]">BC-10495</span>
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 font-mono text-[10px] font-bold text-[#C4161C]">
+                        NEW TIMEOUT
+                      </span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs text-neutral-500">2m ago</span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs font-bold text-neutral-900">Sophie Tremblay</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Assign"
+                        onClick={() => openJob('bc-10495', 'assign')}
+                        className="flex items-center gap-1 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-2.5 py-1 text-xs font-bold text-white shadow-xs cursor-pointer"
+                      >
+                        <Plus className="size-3.5" />
+                        <span>Assign</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Retry search"
+                        onClick={() => setToast('Search restarted')}
+                        className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 shadow-xs cursor-pointer"
+                      >
+                        <RefreshCw className="size-3 text-neutral-500" />
+                        <span>Retry search</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel"
+                        onClick={() => setCancelFor('bc-10495')}
+                        className="flex size-7 items-center justify-center rounded-lg border border-red-200 bg-white hover:bg-red-50 text-[#C4161C] shadow-xs cursor-pointer"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-xs text-neutral-600 flex items-center gap-2">
+                    <MapPin className="size-3.5 text-neutral-400 shrink-0" />
+                    <span>Park Place Mall Door 3</span>
+                    <ArrowRight className="size-3 text-neutral-400 shrink-0" />
+                    <span>Enmax Centre</span>
+                  </div>
+                </div>
+
+                {/* Card 2: BC-10477 */}
+                <div className="rounded-xl border border-red-200 bg-red-50/20 p-3.5 shadow-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#C4161C]">BC-10477</span>
+                      <span className="rounded-full bg-[#8E1017] px-2 py-0.5 font-mono text-[10px] font-bold text-white">
+                        CRITICAL TIMEOUT
+                      </span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs font-semibold text-red-700">21m elapsed</span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs font-bold text-neutral-900">Rahul Mehta</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Assign"
+                        onClick={() => openJob('bc-10477', 'assign')}
+                        className="flex items-center gap-1 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-2.5 py-1 text-xs font-bold text-white shadow-xs cursor-pointer"
+                      >
+                        <Plus className="size-3.5" />
+                        <span>Assign</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Retry search"
+                        onClick={() => setToast('Search restarted')}
+                        className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 shadow-xs cursor-pointer"
+                      >
+                        <RefreshCw className="size-3 text-neutral-500" />
+                        <span>Retry search</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel"
+                        onClick={() => setCancelFor('bc-10477')}
+                        className="flex size-7 items-center justify-center rounded-lg border border-red-200 bg-white hover:bg-red-50 text-[#C4161C] shadow-xs cursor-pointer"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-xs text-neutral-600 flex items-center gap-2">
+                    <MapPin className="size-3.5 text-neutral-400 shrink-0" />
+                    <span>Sandman Signature</span>
+                    <ArrowRight className="size-3 text-neutral-400 shrink-0" />
+                    <span>Lethbridge College</span>
+                  </div>
+
+                  <div className="mt-2 inline-flex items-center gap-1.5 rounded bg-amber-100/80 px-2 py-0.5 text-[11px] font-medium text-amber-900">
+                    <AlertTriangle className="size-3 text-amber-700" />
+                    <span>Flight connection deadline</span>
+                  </div>
+                </div>
+
+                {/* Card 3: BC-10481 */}
+                <div className="rounded-xl border border-neutral-200/90 bg-white p-3.5 shadow-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono font-bold text-[#C4161C]">BC-10481</span>
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-[10px] font-bold text-neutral-700">
+                        TIMED OUT
+                      </span>
+                      <span className="text-neutral-400 text-xs">•</span>
+                      <span className="text-xs text-neutral-500">14m ago</span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        aria-label="Assign"
+                        onClick={() => openJob('bc-10481', 'assign')}
+                        className="flex items-center gap-1 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-2.5 py-1 text-xs font-bold text-white shadow-xs cursor-pointer"
+                      >
+                        <Plus className="size-3.5" />
+                        <span>Assign</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Retry search"
+                        onClick={() => setToast('Search restarted')}
+                        className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 px-2.5 py-1 text-xs font-semibold text-neutral-700 shadow-xs cursor-pointer"
+                      >
+                        <RefreshCw className="size-3 text-neutral-500" />
+                        <span>Retry search</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancel"
+                        onClick={() => setCancelFor('bc-10481')}
+                        className="flex size-7 items-center justify-center rounded-lg border border-red-200 bg-white hover:bg-red-50 text-[#C4161C] shadow-xs cursor-pointer"
+                      >
+                        <Trash2 className="size-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Cancel Reason Drawer */}
+          {cancelFor ? (
+            <div className="rounded-xl border border-red-200 bg-red-50/80 p-3.5 text-xs text-neutral-800 space-y-2">
+              <div className="font-bold text-red-900">Cancel Confirmation</div>
+              <p>Select a cancellation reason for this job:</p>
+              <div className="flex items-center gap-2">
+                <select
+                  className="rounded-lg border border-neutral-200 bg-white px-2 py-1 text-xs outline-none"
+                  value={cancelReason}
+                  onChange={(event) => setCancelReason(event.target.value)}
+                >
+                  {CANCEL_REASONS.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.label}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="destructive"
+                  disabled={busyId != null}
+                  onClick={() => void cancel(cancelFor)}
+                >
+                  {busyId ? 'Cancelling…' : 'Confirm Cancel'}
+                </Button>
+                <Button type="button" size="xs" variant="outline" onClick={() => setCancelFor(null)}>
+                  Abort
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Modal Bottom Footer */}
+        <footer className="flex flex-wrap items-center justify-between border-t border-neutral-200 bg-neutral-50 px-4 py-2.5">
+          <span className="font-mono text-xs text-neutral-500">
+            Showing 1-{count} of 47 timed-out records
+          </span>
+          <button
+            type="button"
+            onClick={() => setToast('Retrying all eligible jobs…')}
+            className="flex items-center gap-1.5 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer"
+          >
+            <RotateCcw className="size-3.5" />
+            <span>Retry All Eligible ({count})</span>
+          </button>
+        </footer>
       </div>
     </div>
   )

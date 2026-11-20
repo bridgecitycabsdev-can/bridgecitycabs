@@ -67,7 +67,7 @@ describe('job form helpers', () => {
       scheduledLocal: '2026-01-15T10:30',
       fixedFare: '600.00',
     }
-    const now = DateTime.fromISO('2026-01-15T17:00:00.000Z', { zone: 'utc' })
+    const now = DateTime.fromISO('2026-01-15T17:00:00.000Z', { zone: 'utc' }) as DateTime<true>
     expect(validateJob(base, config, now).errors.phone).toMatch(/valid phone/i)
     expect(
       validateJob({ ...base, phone: '403-555-0100', scheduledLocal: '2026-01-15T09:50' }, config, now)
@@ -96,7 +96,7 @@ describe('job form helpers', () => {
       when: 'LATER' as const,
       scheduledLocal: '2026-03-08T02:30',
     }
-    const now = DateTime.fromISO('2026-03-07T12:00:00.000Z', { zone: 'utc' })
+    const now = DateTime.fromISO('2026-03-07T12:00:00.000Z', { zone: 'utc' }) as DateTime<true>
     expect(branchInstant('2026-03-08T02:30', 'America/Edmonton')).toBeNull()
     expect(validateJob(form, config, now).errors.scheduledAt).toMatch(/does not exist/i)
   })

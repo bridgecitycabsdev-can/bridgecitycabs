@@ -31,6 +31,9 @@
     --color-muted: var(--muted);
     --color-secondary-foreground: var(--secondary-foreground);
     --color-secondary: var(--secondary);
+    --color-tertiary-foreground: var(--tertiary-foreground);
+    --color-tertiary: var(--tertiary);
+    --color-neutral: var(--neutral);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
     --color-popover-foreground: var(--popover-foreground);
@@ -142,10 +145,15 @@
   --card-foreground: var(--color-text);
   --popover: var(--color-surface);
   --popover-foreground: var(--color-text);
-  --primary: var(--color-brand);
+  --primary: var(--color-primary);
   --primary-foreground: #ffffff;
+  --secondary: var(--color-secondary);
+  --secondary-foreground: #ffffff;
+  --tertiary: var(--color-tertiary);
+  --tertiary-foreground: #ffffff;
+  --neutral: var(--color-neutral);
   --destructive: var(--color-danger);
-  --ring: var(--color-brand);
+  --ring: var(--color-primary);
   --radius: var(--radius-md);
 }
 
@@ -156,8 +164,13 @@
   --card-foreground: var(--color-text);
   --popover: var(--color-surface);
   --popover-foreground: var(--color-text);
-  --primary: var(--color-brand);
+  --primary: var(--color-primary);
   --primary-foreground: #ffffff;
+  --secondary: var(--color-secondary);
+  --secondary-foreground: #ffffff;
+  --tertiary: var(--color-tertiary);
+  --tertiary-foreground: #ffffff;
+  --neutral: var(--color-neutral);
   --destructive: var(--color-danger);
-  --ring: var(--color-brand);
+  --ring: var(--color-primary);
 }

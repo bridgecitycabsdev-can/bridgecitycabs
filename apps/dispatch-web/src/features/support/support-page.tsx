@@ -19,9 +19,12 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface SupportTicketItem {
   id: string
@@ -138,10 +141,12 @@ const INITIAL_TICKETS: SupportTicketItem[] = [
 ]
 
 export function SupportPage() {
-  const [tickets] = useState<SupportTicketItem[]>(INITIAL_TICKETS)
+  const [tickets, setTickets] = useState<SupportTicketItem[]>(INITIAL_TICKETS)
   const [frameState, setFrameState] = useState<'list' | 'detail' | 'controls' | 'newDrawer' | 'skeleton' | 'empty'>('list')
   const [statusTab, setStatusTab] = useState<'all' | 'open' | 'progress' | 'resolved'>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 7
 
   // Detail View State
   const [replyTab, setReplyTab] = useState<'public' | 'internal'>('public')
@@ -162,22 +167,73 @@ export function SupportPage() {
   const [requesterLookupType, setRequesterLookupType] = useState<'passenger' | 'driver' | 'thirdParty'>('driver')
   const [newSubject, setNewSubject] = useState('Meter fare discrepancy on cash trip BC-10482')
 
-  const filtered = tickets.filter((t) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !t.id.toLowerCase().includes(q) &&
-        !t.subject.toLowerCase().includes(q) &&
-        !t.requesterName.toLowerCase().includes(q)
-      ) {
-        return false
+  const filtered = useMemo(() => {
+    return tickets.filter((t) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        if (
+          !t.id.toLowerCase().includes(q) &&
+          !t.subject.toLowerCase().includes(q) &&
+          !t.requesterName.toLowerCase().includes(q)
+        ) {
+          return false
+        }
       }
+      if (statusTab === 'open' && t.status !== 'OPEN') return false
+      if (statusTab === 'progress' && t.status !== 'IN_PROGRESS') return false
+      if (statusTab === 'resolved' && t.status !== 'RESOLVED') return false
+      return true
+    })
+  }, [tickets, searchQuery, statusTab])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const pagedTickets = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'support-tickets',
+      data: filtered,
+      columns: [
+        { header: 'ID', accessor: 'id' },
+        { header: 'Subject', accessor: 'subject' },
+        { header: 'Trip Ref', accessor: 'tripRef' },
+        { header: 'Requester Name', accessor: 'requesterName' },
+        { header: 'Requester Type', accessor: 'requesterType' },
+        { header: 'Status', accessor: 'status' },
+        { header: 'Priority', accessor: 'priority' },
+        { header: 'Assigned To', accessor: 'assignedTo' },
+        { header: 'Last Update', accessor: 'lastUpdate' },
+      ],
+    })
+  }
+
+  const handleCreateTicket = () => {
+    if (!newSubject.trim()) {
+      toast.error('Ticket subject is required.')
+      return
     }
-    if (statusTab === 'open' && t.status !== 'OPEN') return false
-    if (statusTab === 'progress' && t.status !== 'IN_PROGRESS') return false
-    if (statusTab === 'resolved' && t.status !== 'RESOLVED') return false
-    return true
-  })
+
+    const newTicket: SupportTicketItem = {
+      id: `TCK-${Math.floor(1000 + Math.random() * 9000)}`,
+      subject: newSubject,
+      tripRef: 'BC-10499 · Lethbridge West',
+      slaRemaining: '30m left',
+      requesterName: requesterLookupType === 'passenger' ? 'Anita Rao' : 'Harpreet Singh',
+      requesterType: requesterLookupType === 'passenger' ? 'Passenger' : 'Driver',
+      requesterInitials: requesterLookupType === 'passenger' ? 'AR' : 'HS',
+      status: 'OPEN',
+      priority: priorityLevel,
+      assignedTo: 'Priya V.',
+      lastUpdate: 'Just now',
+    }
+
+    setTickets((prev) => [newTicket, ...prev])
+    toast.success(`Ticket ${newTicket.id} created and dispatched to queue.`)
+    setFrameState('list')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -339,6 +395,7 @@ export function SupportPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={handleExportCsv}
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 shadow-2xs cursor-pointer"
                   >
                     <Download className="size-3.5" />
@@ -427,7 +484,10 @@ export function SupportPage() {
                 <div className="flex items-center gap-1 bg-neutral-100 p-0.5 rounded-full border border-neutral-200/60">
                   <button
                     type="button"
-                    onClick={() => setStatusTab('all')}
+                    onClick={() => {
+                      setStatusTab('all')
+                      setCurrentPage(1)
+                    }}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer ${
                       statusTab === 'all' ? 'bg-white shadow-2xs text-neutral-900' : 'text-neutral-500'
                     }`}
@@ -436,7 +496,10 @@ export function SupportPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStatusTab('open')}
+                    onClick={() => {
+                      setStatusTab('open')
+                      setCurrentPage(1)
+                    }}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
                       statusTab === 'open' ? 'bg-white shadow-2xs text-neutral-900' : 'text-neutral-500'
                     }`}
@@ -446,7 +509,10 @@ export function SupportPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStatusTab('progress')}
+                    onClick={() => {
+                      setStatusTab('progress')
+                      setCurrentPage(1)
+                    }}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
                       statusTab === 'progress' ? 'bg-white shadow-2xs text-neutral-900' : 'text-neutral-500'
                     }`}
@@ -456,7 +522,10 @@ export function SupportPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setStatusTab('resolved')}
+                    onClick={() => {
+                      setStatusTab('resolved')
+                      setCurrentPage(1)
+                    }}
                     className={`rounded-full px-3 py-1 text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
                       statusTab === 'resolved' ? 'bg-white shadow-2xs text-neutral-900' : 'text-neutral-500'
                     }`}
@@ -487,7 +556,10 @@ export function SupportPage() {
                     type="text"
                     placeholder="Search by ticket ID, requester, or subject..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="h-9 w-full rounded-xl border border-neutral-200 bg-white pl-9 pr-3 text-xs text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#C4161C] focus:ring-1 focus:ring-[#C4161C]"
                   />
                 </div>
@@ -522,7 +594,7 @@ export function SupportPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {filtered.map((t) => {
+                    {pagedTickets.map((t) => {
                       const isHigh = t.priority === 'High'
                       const isMed = t.priority === 'Medium'
                       return (
@@ -632,42 +704,17 @@ export function SupportPage() {
                 {/* Footer */}
                 <footer className="flex flex-wrap items-center justify-between border-t border-neutral-200 px-4 py-3 bg-neutral-50/50 text-xs">
                   <div className="text-neutral-500 text-[11px]">
-                    Showing 1–{filtered.length} of 19 active tickets •{' '}
+                    Showing {pagedTickets.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, 19)} of 19 active tickets •{' '}
                     <span className="font-mono text-neutral-400">All ticket updates logged to #SUP-2026-YQL</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-400 text-xs disabled:opacity-50"
-                    >
-                      Previous
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded bg-[#C4161C] text-white font-bold text-xs shadow-xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      Next
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={Math.max(totalPages, 3)}
+                    totalItems={19}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                 </footer>
               </div>
             </div>
@@ -879,6 +926,11 @@ export function SupportPage() {
                         <span className="font-mono text-[10px] text-neutral-400">Press ⌘+Enter</span>
                         <button
                           type="button"
+                          onClick={() => {
+                            if (!replyText.trim()) return
+                            toast.success('Reply transmitted to requester via push notification & SMS.')
+                            setReplyText('')
+                          }}
                           className="flex items-center gap-1.5 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-4 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer"
                         >
                           <Send className="size-3.5" />
@@ -1237,7 +1289,10 @@ export function SupportPage() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => setFrameState('detail')}
+                        onClick={() => {
+                          toast.success('Ticket status transition confirmed and recorded in audit ledger.')
+                          setFrameState('detail')
+                        }}
                         className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-4 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                       >
                         ✔ Confirm Status Change
@@ -1593,8 +1648,8 @@ export function SupportPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFrameState('list')}
-                      className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs"
+                      onClick={handleCreateTicket}
+                      className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                     >
                       ✔ Create Ticket
                     </button>

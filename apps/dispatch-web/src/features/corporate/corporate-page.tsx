@@ -29,6 +29,9 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface CorporateAccountItem {
   id: string
@@ -379,10 +382,21 @@ export function CorporatePage() {
   const [selectedGroupId, setSelectedGroupId] = useState('grp-02')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [accounts, setAccounts] = useState<CorporateAccountItem[]>(DEFAULT_ACCOUNTS)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
+
+  const [drawerForm, setDrawerForm] = useState({
+    name: 'Prairie Health Group',
+    sector: 'Healthcare / Clinic',
+    billingEmail: 'billing@prairiehealth.ca',
+    creditLimit: '5000.00',
+    terms: 'Net 30',
+  })
 
   const selectedGroup = UMBRELLA_GROUPS.find((g) => g.id === selectedGroupId) || UMBRELLA_GROUPS[0]
 
-  const filteredAccounts = DEFAULT_ACCOUNTS.filter((acc) => {
+  const filteredAccounts = accounts.filter((acc) => {
     if (statusFilter === 'active' && acc.status !== 'Active') return false
     if (statusFilter === 'inactive' && acc.status !== 'Inactive') return false
     if (searchQuery.trim()) {
@@ -396,6 +410,82 @@ export function CorporatePage() {
     }
     return true
   })
+
+  const totalPages = Math.max(1, Math.ceil(filteredAccounts.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const pagedAccounts = filteredAccounts.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize,
+  )
+  const showingStart = filteredAccounts.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1
+  const showingEnd = Math.min(safeCurrentPage * pageSize, filteredAccounts.length)
+
+  const handleExportCSV = () => {
+    const headers = [
+      'Account #',
+      'Company / Account',
+      'Primary Contact',
+      'Email',
+      'Credit Limit ($)',
+      'Balance Owed ($)',
+      'Status',
+    ]
+    const rows = filteredAccounts.map((a) => [
+      a.id,
+      a.name,
+      a.primaryContact.name,
+      a.primaryContact.email || '',
+      a.creditLimit.toFixed(2),
+      a.balanceOwed.toFixed(2),
+      a.status,
+    ])
+    exportToCsv('corporate-accounts.csv', headers, rows)
+  }
+
+  const handleResetFilters = () => {
+    setSearchQuery('')
+    setStatusFilter('all')
+    setCurrentPage(1)
+    toast.info('Filters Reset', 'Corporate accounts list reset to default.')
+  }
+
+  const handleSaveAccount = () => {
+    if (!drawerForm.name.trim()) {
+      toast.error('Validation Error', 'Please enter a company name.')
+      return
+    }
+    const limitNum = parseFloat(drawerForm.creditLimit || '5000') || 5000
+    const newId = `ACC-0${Math.floor(15 + Math.random() * 80)}`
+    const newAccount: CorporateAccountItem = {
+      id: newId,
+      name: drawerForm.name,
+      sector: drawerForm.sector || 'Healthcare',
+      initials: drawerForm.name
+        .split(' ')
+        .map((w) => w[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase(),
+      initialsColor: 'bg-red-50 text-[#C4161C]',
+      primaryContact: {
+        name: 'Operations Lead',
+        email: drawerForm.billingEmail,
+      },
+      creditLimit: limitNum,
+      creditLimitFormatted: `$${limitNum.toLocaleString()}`,
+      utilized: 0,
+      utilizedFormatted: '$0.00',
+      utilizationPct: 0,
+      balanceOwed: 0,
+      balanceOwedFormatted: '$0.00',
+      paymentTerms: drawerForm.terms || 'NET 30',
+      status: 'Active',
+    }
+    setAccounts((prev) => [newAccount, ...prev])
+    toast.success('Corporate Account Saved', `Account "${drawerForm.name}" registered successfully.`)
+    setFrameState('list')
+    setCurrentPage(1)
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -624,6 +714,7 @@ export function CorporatePage() {
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
+                    onClick={handleExportCSV}
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-xs cursor-pointer"
                   >
                     <Download className="size-3.5 text-neutral-400" />
@@ -699,14 +790,20 @@ export function CorporatePage() {
                       type="text"
                       placeholder="Search company name, account #, contact, or email..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="h-9 w-full rounded-lg border border-neutral-200 bg-neutral-50/70 pl-9 pr-3 text-xs text-neutral-900 outline-none transition focus:border-[#C4161C] focus:bg-white focus:ring-1 focus:ring-[#C4161C]"
                     />
                   </div>
 
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="h-9 rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-xs font-semibold text-neutral-700 outline-none transition focus:border-[#C4161C] focus:bg-white"
                   >
                     <option value="all">All Statuses: Active (35), Inactive (3)</option>
@@ -714,7 +811,10 @@ export function CorporatePage() {
                     <option value="inactive">Inactive (3)</option>
                   </select>
 
-                  <select className="h-9 rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-xs font-semibold text-neutral-700 outline-none transition focus:border-[#C4161C] focus:bg-white">
+                  <select
+                    aria-label="Filter by group sector"
+                    className="h-9 rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-xs font-semibold text-neutral-700 outline-none transition focus:border-[#C4161C] focus:bg-white"
+                  >
                     <option value="all">All Groups: All Sectors</option>
                     <option value="grp-02">Healthcare &amp; Medical</option>
                     <option value="grp-01">Hospitality &amp; Tourism</option>
@@ -725,10 +825,7 @@ export function CorporatePage() {
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setSearchQuery('')
-                    setStatusFilter('all')
-                  }}
+                  onClick={handleResetFilters}
                   className="flex items-center gap-1 text-xs font-semibold text-neutral-500 hover:text-neutral-800 transition cursor-pointer"
                 >
                   <RotateCcw className="size-3.5" />
@@ -773,7 +870,7 @@ export function CorporatePage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100 font-medium">
-                      {filteredAccounts.map((account) => (
+                      {pagedAccounts.map((account) => (
                         <tr
                           key={account.id}
                           className="hover:bg-neutral-50/80 transition cursor-pointer"
@@ -920,60 +1017,16 @@ export function CorporatePage() {
                 </div>
 
                 {/* Table Footer & Pagination */}
-                <div className="flex flex-wrap items-center justify-between border-t border-neutral-200 bg-[#F9FAFB] px-4 py-3 text-xs text-neutral-500">
-                  <div className="flex items-center gap-2">
-                    <span>Showing 1–8 of 38 corporate accounts</span>
-                    <span>•</span>
-                    <span className="font-mono text-[10px] text-neutral-400">
-                      CAD Ledger: #CORP-2026-YQL
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100 text-xs"
-                    >
-                      &lt;
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded bg-[#C4161C] text-white font-bold text-xs shadow-2xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      4
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      5
-                    </button>
-                    <button
-                      type="button"
-                      className="flex size-7 items-center justify-center rounded border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100 text-xs"
-                    >
-                      &gt;
-                    </button>
-                  </div>
-                </div>
+                <TablePagination
+                  currentPage={safeCurrentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  showingStart={showingStart}
+                  showingEnd={showingEnd}
+                  totalCount={filteredAccounts.length}
+                  entityName="corporate accounts"
+                  ledgerCode="CAD Ledger: #CORP-2026-YQL"
+                />
               </div>
             </div>
           ) : frameState === 'detail' ? (
@@ -1440,7 +1493,8 @@ export function CorporatePage() {
                       <div className="relative">
                         <input
                           type="text"
-                          defaultValue="Prairie Health Group"
+                          value={drawerForm.name}
+                          onChange={(e) => setDrawerForm({ ...drawerForm, name: e.target.value })}
                           className="h-10 w-full rounded-lg border border-neutral-200 bg-white px-3 pr-9 text-xs text-neutral-900 outline-none focus:border-[#C4161C] focus:ring-1 focus:ring-[#C4161C]"
                         />
                         <Check className="pointer-events-none absolute right-3 top-3 size-4 text-emerald-600" />
@@ -1550,7 +1604,7 @@ export function CorporatePage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFrameState('list')}
+                      onClick={handleSaveAccount}
                       className="flex items-center gap-1.5 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                     >
                       <Check className="size-4" />

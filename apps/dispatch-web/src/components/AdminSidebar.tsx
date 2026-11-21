@@ -29,6 +29,8 @@ interface AdminSidebarProps {
     | 'vehicles'
     | 'support'
     | 'corporate'
+    | 'fare-rules'
+    | 'promo-codes'
     | 'invoices'
     | 'payouts'
     | 'weekly-closing'
@@ -186,20 +188,28 @@ export function AdminSidebar({ activeSection, subtitle = 'Lethbridge Branch (YQL
           <div className="px-3 text-[10px] font-bold tracking-wider text-neutral-600 uppercase">
             PRICING
           </div>
-          <button
-            type="button"
-            className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition text-left cursor-pointer"
+          <Link
+            to="/fare-rules"
+            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 transition ${
+              activeSection === 'fare-rules'
+                ? 'bg-[#C4161C] text-white shadow-xs font-bold'
+                : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+            }`}
           >
-            <Tag className="size-4 text-neutral-400" />
+            <Tag className={`size-4 ${activeSection === 'fare-rules' ? 'text-white' : 'text-neutral-400'}`} />
             <span>Fare Rules</span>
-          </button>
-          <button
-            type="button"
-            className="w-full flex items-center gap-2.5 rounded-lg px-3 py-2 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition text-left cursor-pointer"
+          </Link>
+          <Link
+            to="/promo-codes"
+            className={`flex items-center gap-2.5 rounded-lg px-3 py-2 transition ${
+              activeSection === 'promo-codes'
+                ? 'bg-[#C4161C] text-white shadow-xs font-bold'
+                : 'text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900'
+            }`}
           >
-            <Percent className="size-4 text-neutral-400" />
+            <Percent className={`size-4 ${activeSection === 'promo-codes' ? 'text-white' : 'text-neutral-400'}`} />
             <span>Promo Codes</span>
-          </button>
+          </Link>
         </div>
 
         {/* Finance Section */}

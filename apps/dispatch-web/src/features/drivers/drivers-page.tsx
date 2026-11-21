@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Clock,
+  Download,
   FileText,
   Home,
   Mail,
@@ -22,8 +23,11 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface DriverRosterItem {
   id: string
@@ -184,13 +188,15 @@ const INITIAL_DRIVERS: DriverRosterItem[] = [
 ]
 
 export function DriversPage() {
-  const [drivers] = useState<DriverRosterItem[]>(INITIAL_DRIVERS)
+  const [drivers, setDrivers] = useState<DriverRosterItem[]>(INITIAL_DRIVERS)
   const [selectedDriver, setSelectedDriver] = useState<DriverRosterItem>(INITIAL_DRIVERS[0])
   const [frameState, setFrameState] = useState<'list' | 'detail' | 'drawer' | 'empty' | 'skeleton'>('list')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [vehicleFilter, setVehicleFilter] = useState('')
   const [detailTab, setDetailTab] = useState<'profile' | 'vehicle' | 'documents' | 'ratings' | 'location' | 'payout'>('profile')
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
 
   // Drawer form state
   const [editForm, setEditForm] = useState({
@@ -201,20 +207,87 @@ export function DriversPage() {
     license: 'AB-992014-X8',
   })
 
-  const filteredDrivers = drivers.filter((item) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !item.name.toLowerCase().includes(q) &&
-        !item.unitId.toLowerCase().includes(q) &&
-        !item.phone.toLowerCase().includes(q)
-      ) {
-        return false
+  const filteredDrivers = useMemo(() => {
+    return drivers.filter((item) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        if (
+          !item.name.toLowerCase().includes(q) &&
+          !item.unitId.toLowerCase().includes(q) &&
+          !item.phone.toLowerCase().includes(q)
+        ) {
+          return false
+        }
       }
+      if (statusFilter && item.status !== statusFilter) return false
+      return true
+    })
+  }, [drivers, searchQuery, statusFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredDrivers.length / pageSize))
+  const pagedDrivers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredDrivers.slice(start, start + pageSize)
+  }, [filteredDrivers, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'drivers-roster',
+      data: filteredDrivers,
+      columns: [
+        { header: 'ID', accessor: 'id' },
+        { header: 'Driver Code', accessor: 'driverCode' },
+        { header: 'Name', accessor: 'name' },
+        { header: 'Unit ID', accessor: 'unitId' },
+        { header: 'Phone', accessor: 'phone' },
+        { header: 'Vehicle', accessor: 'vehicleAssigned' },
+        { header: 'Status', accessor: 'status' },
+        { header: 'Document Status', accessor: 'documentStatus' },
+        { header: 'Rating', accessor: 'rating' },
+        { header: 'Last Shift', accessor: 'lastShift' },
+      ],
+    })
+  }
+
+  const handleSaveDriver = () => {
+    if (!editForm.name.trim() || !editForm.phone.trim()) {
+      toast.error('Driver name and phone number are required.')
+      return
     }
-    if (statusFilter && item.status !== statusFilter) return false
-    return true
-  })
+    const initials = editForm.name
+      .split(' ')
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase()
+
+    const newDriver: DriverRosterItem = {
+      id: `drv-${Date.now()}`,
+      name: editForm.name,
+      driverCode: `Driver #YQL-${Math.floor(1000 + Math.random() * 9000)}`,
+      initials: initials || 'DR',
+      unitId: editForm.unitId || `U-${Math.floor(100 + Math.random() * 900)}`,
+      phone: editForm.phone,
+      vehicleAssigned: 'Reserve Pool / Pending',
+      vehicleClass: 'Pending Assignment',
+      status: 'ACTIVE',
+      documentStatus: 'VERIFIED',
+      rating: 5.0,
+      reviewsCount: 0,
+      lastShift: 'Just now',
+      isVerified: true,
+      email: editForm.email,
+      licenseNumber: editForm.license,
+      assignedDepot: 'Lethbridge Depot (YQL)',
+      depotZone: 'Lethbridge West & Downtown Core',
+      tenure: 'Today',
+      contractedShift: 'Day Shift (06:00 – 16:00 MST)',
+    }
+
+    setDrivers((prev) => [newDriver, ...prev])
+    toast.success(`Driver ${editForm.name} profile saved to fleet roster.`)
+    setFrameState('list')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -344,14 +417,24 @@ export function DriversPage() {
             </button>
 
             {frameState !== 'detail' ? (
-              <button
-                type="button"
-                onClick={() => setFrameState('drawer')}
-                className="ml-2 flex items-center gap-1.5 rounded-full bg-[#C4161C] hover:bg-[#9E1017] px-3.5 py-1 text-xs font-bold text-white shadow-xs transition cursor-pointer"
-              >
-                <Plus className="size-3.5" />
-                <span>Add driver</span>
-              </button>
+              <div className="flex items-center gap-2 ml-2">
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  className="flex items-center gap-1.5 rounded-full border border-neutral-300 bg-white hover:bg-neutral-50 px-3 py-1 text-xs font-semibold text-neutral-700 shadow-2xs transition cursor-pointer"
+                >
+                  <Download className="size-3.5 text-neutral-500" />
+                  <span>Export CSV</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFrameState('drawer')}
+                  className="flex items-center gap-1.5 rounded-full bg-[#C4161C] hover:bg-[#9E1017] px-3.5 py-1 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                >
+                  <Plus className="size-3.5" />
+                  <span>Add driver</span>
+                </button>
+              </div>
             ) : null}
           </div>
         </div>
@@ -381,7 +464,10 @@ export function DriversPage() {
                       type="text"
                       placeholder="Search driver by name, unit, phone..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="h-9 w-full rounded-xl border border-neutral-200 bg-neutral-50/60 pl-9 pr-3 text-xs text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#C4161C] focus:bg-white focus:ring-1 focus:ring-[#C4161C]"
                     />
                   </div>
@@ -389,7 +475,10 @@ export function DriversPage() {
                   {/* Status Dropdown */}
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-700 outline-none"
                   >
                     <option value="">All Statuses (86)</option>
@@ -442,7 +531,7 @@ export function DriversPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {filteredDrivers.map((driver) => {
+                    {pagedDrivers.map((driver) => {
                       const isActive = driver.status === 'ACTIVE'
                       const isSuspended = driver.status === 'SUSPENDED'
                       const isPending = driver.status === 'PENDING APPROVAL'
@@ -568,54 +657,17 @@ export function DriversPage() {
                 {/* Pagination Footer */}
                 <footer className="flex flex-wrap items-center justify-between border-t border-neutral-200 px-4 py-3 bg-neutral-50/50 text-xs">
                   <div className="text-neutral-500 text-[11px]">
-                    Showing 1–{filteredDrivers.length} of 86 drivers •{' '}
+                    Showing {pagedDrivers.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, 86)} of 86 drivers •{' '}
                     <span className="font-mono text-neutral-400">Lethbridge Municipal Fleet ID #AB-YQL-OPS</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-400 text-xs disabled:opacity-50"
-                    >
-                      &lt; Previous
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded bg-[#C4161C] text-white font-bold text-xs shadow-xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      4
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      5
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      Next &gt;
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={Math.max(totalPages, 11)}
+                    totalItems={86}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                 </footer>
               </div>
             </div>
@@ -674,6 +726,13 @@ export function DriversPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
+                        onClick={() => {
+                          setSelectedDriver({ ...selectedDriver, status: 'OFFLINE' })
+                          setDrivers((prev) =>
+                            prev.map((d) => (d.id === selectedDriver.id ? { ...d, status: 'OFFLINE' } : d))
+                          )
+                          toast.info(`Driver ${selectedDriver.name} (${selectedDriver.unitId}) forced offline.`)
+                        }}
                         className="flex items-center gap-1.5 rounded-xl border border-neutral-300 bg-white px-3 py-1.5 text-xs font-bold text-neutral-700 hover:bg-neutral-100 shadow-2xs cursor-pointer"
                       >
                         <Power className="size-3.5" />
@@ -681,6 +740,13 @@ export function DriversPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => {
+                          setSelectedDriver({ ...selectedDriver, status: 'ACTIVE' })
+                          setDrivers((prev) =>
+                            prev.map((d) => (d.id === selectedDriver.id ? { ...d, status: 'ACTIVE' } : d))
+                          )
+                          toast.success(`Driver ${selectedDriver.name} (${selectedDriver.unitId}) approved for live dispatch.`)
+                        }}
                         className="flex items-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white shadow-xs cursor-pointer"
                       >
                         <CheckCircle2 className="size-3.5" />
@@ -688,6 +754,13 @@ export function DriversPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => {
+                          setSelectedDriver({ ...selectedDriver, status: 'SUSPENDED' })
+                          setDrivers((prev) =>
+                            prev.map((d) => (d.id === selectedDriver.id ? { ...d, status: 'SUSPENDED' } : d))
+                          )
+                          toast.error(`Driver ${selectedDriver.name} (${selectedDriver.unitId}) suspended.`)
+                        }}
                         className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3 py-1.5 text-xs font-bold text-[#C4161C] hover:bg-red-50 shadow-2xs cursor-pointer"
                       >
                         <XCircle className="size-3.5" />
@@ -1076,8 +1149,8 @@ export function DriversPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFrameState('list')}
-                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs"
+                  onClick={handleSaveDriver}
+                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                 >
                   ✔ Save driver profile
                 </button>

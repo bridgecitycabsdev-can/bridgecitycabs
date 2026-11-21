@@ -25,6 +25,8 @@ import {
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface BranchSummary {
   id: string
@@ -123,6 +125,7 @@ const BRANCHES: BranchSummary[] = [
 
 export function BranchesPage() {
   const navigate = useNavigate()
+  const [branches, setBranches] = useState<BranchSummary[]>(BRANCHES)
   const [activeFrame, setActiveFrame] = useState<'frame1' | 'frame2' | 'frame3' | 'frame4'>('frame1')
   const [accessTier, setAccessTier] = useState<'super_admin' | 'branch_admin' | 'dispatcher'>('branch_admin')
   const [showCopied, setShowCopied] = useState(false)
@@ -133,6 +136,33 @@ export function BranchesPage() {
     navigator.clipboard?.writeText(text)
     setShowCopied(true)
     setTimeout(() => setShowCopied(false), 2000)
+  }
+
+  const handleExportBranches = () => {
+    const headers = ['Branch Name', 'Code', 'Region', 'Status', 'Drivers', 'Vehicles', 'Active Jobs']
+    const rows = branches.map((b) => [
+      b.name,
+      b.code,
+      b.region,
+      b.status,
+      b.driversCount,
+      b.vehiclesCount,
+      b.activeJobsCount,
+    ])
+    exportToCsv('municipal-branches-directory.csv', headers, rows)
+  }
+
+  const handleSaveBranch = () => {
+    toast.success('Branch Configuration Saved', 'Municipal node coordinates and settings updated.')
+    setActiveFrame('frame2')
+  }
+
+  const handleDeactivateBranch = () => {
+    setBranches((prev) =>
+      prev.map((b) => (b.code === 'YQL' || b.code === 'LTH' ? { ...b, status: 'INACTIVE' } : b)),
+    )
+    toast.info('Branch Decommissioned', 'Branch has been deactivated and geofences severed.')
+    setActiveFrame('frame1')
   }
 
   return (
@@ -263,6 +293,7 @@ export function BranchesPage() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
+                    onClick={handleExportBranches}
                     className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg shadow-2xs hover:bg-neutral-50 transition cursor-pointer"
                   >
                     <Download className="size-3.5 text-neutral-500" />
@@ -1207,8 +1238,8 @@ export function BranchesPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setActiveFrame('frame2')}
-                    className="px-6 py-2 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5"
+                    onClick={handleSaveBranch}
+                    className="px-6 py-2 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] text-white text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
                   >
                     <Check className="size-3.5" />
                     <span>Save branch</span>
@@ -1301,7 +1332,7 @@ export function BranchesPage() {
                   <button
                     type="button"
                     disabled={!deactivateConfirmed}
-                    onClick={() => setActiveFrame('frame1')}
+                    onClick={handleDeactivateBranch}
                     className={`flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl text-white text-xs font-bold transition shadow-xs ${
                       deactivateConfirmed
                         ? 'bg-[#C4161C] hover:bg-[#9E1017] cursor-pointer'

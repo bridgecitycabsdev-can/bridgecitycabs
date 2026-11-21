@@ -27,6 +27,9 @@ import {
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface PayoutRecord {
   id: string
@@ -170,6 +173,9 @@ export function PayoutsPage() {
 
   const isReadOnly = viewState === 'branch_admin'
 
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
+
   // Filter payouts
   const filteredPayouts = payoutsList.filter((item) => {
     if (statusFilter !== 'ALL' && item.status !== statusFilter) return false
@@ -185,16 +191,41 @@ export function PayoutsPage() {
     return true
   })
 
+  const totalPages = Math.max(1, Math.ceil(filteredPayouts.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const pagedPayouts = filteredPayouts.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize,
+  )
+  const showingStart = filteredPayouts.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1
+  const showingEnd = Math.min(safeCurrentPage * pageSize, filteredPayouts.length)
+
   const copyRefToClipboard = () => {
     navigator.clipboard?.writeText(refNumber)
     setCopiedRef(true)
     setTimeout(() => setCopiedRef(false), 2000)
   }
 
+  const handleExportCSV = () => {
+    const headers = ['ID', 'Driver Name', 'Unit #', 'Email', 'Amount (CAD)', 'Batch #', 'Status', 'Date']
+    const rows = filteredPayouts.map((p) => [
+      p.id,
+      p.driverName,
+      p.unitId,
+      p.email,
+      p.amountFormatted,
+      p.batchNo,
+      p.status,
+      p.createdTime,
+    ])
+    exportToCsv('driver-payouts-journal.csv', headers, rows)
+  }
+
   const handleMarkSent = (record: PayoutRecord) => {
     setPayoutsList((prev) =>
       prev.map((p) => (p.id === record.id ? { ...p, status: 'SENT' } : p))
     )
+    toast.success('Payout Disbursed', `Interac e-Transfer sent to ${record.driverName} (${record.amountFormatted}).`)
     setActiveFrame('frame1')
   }
 
@@ -202,6 +233,16 @@ export function PayoutsPage() {
     setPayoutsList((prev) =>
       prev.map((p) => (p.id === record.id ? { ...p, status: 'FAILED', needsReversal: true } : p))
     )
+    toast.error('Payout Marked Failed', `Disbursement to ${record.driverName} flagged for reversal.`)
+    setActiveFrame('frame1')
+  }
+
+  const handleRunPayoutsBatch = () => {
+    setPayoutsList((prev) =>
+      prev.map((p) => (p.status === 'PENDING' ? { ...p, status: 'SENT' } : p))
+    )
+    toast.success('Payouts Batch Disbursed', 'All pending Interac e-transfers have been cleared.')
+    setShowRunPayoutsModal(false)
     setActiveFrame('frame1')
   }
 
@@ -394,7 +435,8 @@ export function PayoutsPage() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition"
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
                   >
                     <Download className="size-3.5" />
                     Export CSV
@@ -607,7 +649,7 @@ export function PayoutsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-200">
-                        {filteredPayouts.map((row) => (
+                        {pagedPayouts.map((row) => (
                           <tr key={row.id} className="hover:bg-neutral-50/80 transition">
                             {/* Driver */}
                             <td className="py-3.5 px-4">
@@ -730,49 +772,16 @@ export function PayoutsPage() {
                   </div>
 
                   {/* Table Footer */}
-                  <div className="p-4 border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-500">
-                    <div>
-                      Showing 1–8 of 27 payouts · Lethbridge CAD Transit Disbursal Journal #PAY-2026-YQL
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                      >
-                        Prev
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded bg-[#C4161C] text-white font-bold"
-                      >
-                        1
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                      >
-                        2
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                      >
-                        3
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                      >
-                        4
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </div>
+                  <TablePagination
+                    currentPage={safeCurrentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    showingStart={showingStart}
+                    showingEnd={showingEnd}
+                    totalCount={filteredPayouts.length}
+                    entityName="payouts"
+                    ledgerCode="Lethbridge CAD Transit Disbursal Journal #PAY-2026-YQL"
+                  />
                 </div>
               )}
 
@@ -973,11 +982,8 @@ export function PayoutsPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setActiveFrame('frame1')
-                      setShowRunPayoutsModal(false)
-                    }}
-                    className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition"
+                    onClick={handleRunPayoutsBatch}
+                    className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition cursor-pointer"
                   >
                     Confirm &amp; Run Payouts Batch
                   </button>
@@ -1909,10 +1915,8 @@ export function PayoutsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setShowRunPayoutsModal(false)
-                }}
-                className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition"
+                onClick={handleRunPayoutsBatch}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition cursor-pointer"
               >
                 Confirm &amp; Run Payouts Batch
               </button>

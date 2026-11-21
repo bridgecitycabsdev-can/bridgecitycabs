@@ -8,12 +8,14 @@ import { BranchesPage } from '@/features/branches/branches-page'
 import { CorporatePage } from '@/features/corporate/corporate-page'
 import { DashboardPage } from '@/features/dashboard/dashboard-page'
 import { DriversPage } from '@/features/drivers/drivers-page'
+import { FareRulesPage } from '@/features/fares/fare-rules-page'
 import { ConsolePage } from '@/features/fleet/console-page'
 import { InvoicesPage } from '@/features/invoices/invoices-page'
 import { LeasesPage } from '@/features/leases/leases-page'
 import { LedgerPage } from '@/features/ledger/ledger-page'
 import { PassengersPage } from '@/features/passengers/passengers-page'
 import { PayoutsPage } from '@/features/payouts/payouts-page'
+import { PromoCodesPage } from '@/features/promos/promo-codes-page'
 import { ReportsPage } from '@/features/reports/reports-page'
 import { SupportPage } from '@/features/support/support-page'
 import { UsersPage } from '@/features/users/users-page'
@@ -47,6 +49,8 @@ export function AppRouter() {
       <Route path="/vehicles" element={<DispatchGate><VehiclesPage /></DispatchGate>} />
       <Route path="/support" element={<DispatchGate><SupportPage /></DispatchGate>} />
       <Route path="/corporate" element={<DispatchGate><CorporatePage /></DispatchGate>} />
+      <Route path="/fare-rules" element={<DispatchGate><FareRulesPage /></DispatchGate>} />
+      <Route path="/promo-codes" element={<DispatchGate><PromoCodesPage /></DispatchGate>} />
       <Route path="/invoices" element={<DispatchGate><InvoicesPage /></DispatchGate>} />
       <Route path="/payouts" element={<DispatchGate><PayoutsPage /></DispatchGate>} />
       <Route path="/weekly-closing" element={<DispatchGate><WeeklyClosingPage /></DispatchGate>} />

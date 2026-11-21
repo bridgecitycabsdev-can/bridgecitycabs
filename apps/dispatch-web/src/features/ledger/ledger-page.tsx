@@ -24,8 +24,11 @@ import {
   Undo2,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface LedgerEntry {
   id: string
@@ -152,6 +155,9 @@ export function LedgerPage() {
   const [activeSegment, setActiveSegment] = useState<'DRIVER' | 'COMPANY' | 'GST' | 'AR'>('DRIVER')
   const [searchQuery, setSearchQuery] = useState('')
   const [reversedOnly, setReversedOnly] = useState(false)
+  const [entries, setEntries] = useState<LedgerEntry[]>(DEFAULT_LEDGER_ENTRIES)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 6
   const [selectedEntry, setSelectedEntry] = useState<LedgerEntry>(DEFAULT_LEDGER_ENTRIES[0])
   const [copiedAccount, setCopiedAccount] = useState(false)
   const [reversalExecuted, setReversalExecuted] = useState(false)
@@ -160,19 +166,77 @@ export function LedgerPage() {
   )
 
   // Filter entries
-  const filteredEntries = DEFAULT_LEDGER_ENTRIES.filter((item) => {
-    if (reversedOnly && !item.isReversal && !item.isReversed) return false
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      return (
-        item.id.toLowerCase().includes(q) ||
-        item.description.toLowerCase().includes(q) ||
-        item.subtext.toLowerCase().includes(q) ||
-        item.sourceId.toLowerCase().includes(q)
-      )
+  const filteredEntries = useMemo(() => {
+    return entries.filter((item) => {
+      if (reversedOnly && !item.isReversal && !item.isReversed) return false
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase()
+        return (
+          item.id.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q) ||
+          item.subtext.toLowerCase().includes(q) ||
+          item.sourceId.toLowerCase().includes(q)
+        )
+      }
+      return true
+    })
+  }, [entries, reversedOnly, searchQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / pageSize))
+  const pagedEntries = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredEntries.slice(start, start + pageSize)
+  }, [filteredEntries, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv(
+      filteredEntries.map((e) => ({
+        ID: e.id,
+        DateTime: e.dateTime,
+        Description: e.description,
+        Subtext: e.subtext,
+        SourceType: e.sourceType,
+        SourceId: e.sourceId,
+        Amount: e.amountFormatted,
+        IsReversal: e.isReversal ? 'Yes' : 'No',
+        IsReversed: e.isReversed ? 'Yes' : 'No',
+        ReversalRef: e.reversalRef || '',
+      })),
+      `ledger-transactions-${activeSegment.toLowerCase()}`
+    )
+  }
+
+  const handleExecuteReversal = () => {
+    if (selectedEntry.isReversed) {
+      toast.error('Transaction is already reversed')
+      return
     }
-    return true
-  })
+    const newReversalId = `TXN-2026-${Math.floor(10000 + Math.random() * 90000)}`
+    const revAmount = -selectedEntry.amount
+    const reversalEntry: LedgerEntry = {
+      id: newReversalId,
+      dateTime: 'Just now',
+      description: `Reversal of ${selectedEntry.id} (${reversalReason.slice(0, 45)}...)`,
+      subtext: `Offset debit created by Priya V. · ${reversalReason}`,
+      sourceType: 'Manual',
+      sourceId: 'ADJ-REV',
+      amount: revAmount,
+      amountFormatted: revAmount > 0 ? `+$${revAmount.toFixed(2)}` : `-$${Math.abs(revAmount).toFixed(2)}`,
+      isReversal: true,
+    }
+
+    setEntries((prev) => [
+      reversalEntry,
+      ...prev.map((e) =>
+        e.id === selectedEntry.id
+          ? { ...e, isReversed: true, reversalRef: newReversalId }
+          : e
+      ),
+    ])
+    setSelectedEntry((prev) => ({ ...prev, isReversed: true, reversalRef: newReversalId }))
+    setReversalExecuted(true)
+    toast.success(`Transaction ${selectedEntry.id} reversed via ${newReversalId}`)
+  }
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard?.writeText(text)
@@ -500,7 +564,10 @@ export function LedgerPage() {
                     <input
                       type="checkbox"
                       checked={reversedOnly}
-                      onChange={(e) => setReversedOnly(e.target.checked)}
+                      onChange={(e) => {
+                        setReversedOnly(e.target.checked)
+                        setCurrentPage(1)
+                      }}
                       className="rounded border-neutral-300 text-[#C4161C] focus:ring-[#C4161C]"
                     />
                     <span>Reversed only</span>
@@ -514,13 +581,17 @@ export function LedgerPage() {
                       type="text"
                       placeholder="Search transaction ID, booking #, descript"
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-neutral-300 focus:outline-none focus:border-[#C4161C]"
                     />
                   </div>
                   <button
                     type="button"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-2xs transition"
+                    onClick={handleExportCsv}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
                   >
                     <Download className="size-3.5" />
                     Export CSV
@@ -550,7 +621,7 @@ export function LedgerPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-200">
-                      {filteredEntries.map((row) => (
+                      {pagedEntries.map((row) => (
                         <tr
                           key={row.id}
                           onClick={() => {
@@ -590,49 +661,14 @@ export function LedgerPage() {
                 </div>
 
                 {/* Pagination */}
-                <div className="p-4 border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-500">
-                  <div>
-                    Showing 1–10 of 142 ledger transactions · #GL-2026-YQL
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                    >
-                      &lt; Previous
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded bg-[#C4161C] text-white font-bold"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                    >
-                      3
-                    </button>
-                    <span className="px-1 text-neutral-400">...</span>
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                    >
-                      15
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                    >
-                      Next &gt;
-                    </button>
-                  </div>
+                <div className="p-4 border-t border-neutral-200">
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={filteredEntries.length}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                  />
                 </div>
               </div>
 
@@ -739,7 +775,7 @@ export function LedgerPage() {
                     DESCRIPTION
                   </span>
                   <div className="p-3 rounded-xl bg-neutral-50 border border-neutral-200 text-xs text-neutral-800 leading-snug">
-                    Metered fare credit - Job BC-10482 (340 Columbia Blvd W → Lethbridge Airport)
+                    {selectedEntry.description}
                   </div>
                 </div>
 
@@ -751,7 +787,7 @@ export function LedgerPage() {
                   <div className="flex items-center justify-between">
                     <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-red-50 text-[#C4161C] border border-red-200 text-xs font-bold">
                       <Building2 className="size-3" />
-                      Booking BC-10482
+                      {selectedEntry.sourceType} {selectedEntry.sourceId}
                       <ExternalLink className="size-2.5" />
                     </span>
                   </div>
@@ -781,9 +817,9 @@ export function LedgerPage() {
                     </div>
                     <div className="text-right">
                       <span className="px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[10px] font-bold uppercase">
-                        CREDIT
+                        {selectedEntry.amount >= 0 ? 'CREDIT' : 'DEBIT'}
                       </span>
-                      <div className="text-sm font-black text-neutral-900 mt-0.5">+$19.43 CAD</div>
+                      <div className="text-sm font-black text-neutral-900 mt-0.5">{selectedEntry.amountFormatted} CAD</div>
                     </div>
                   </div>
                 </div>
@@ -792,16 +828,21 @@ export function LedgerPage() {
                 <div className="space-y-2 pt-2">
                   <button
                     type="button"
+                    disabled={selectedEntry.isReversed || selectedEntry.isReversal}
                     onClick={() => setActiveFrame('frame3')}
-                    className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] text-white text-xs font-bold transition shadow-xs cursor-pointer"
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition shadow-xs ${
+                      selectedEntry.isReversed || selectedEntry.isReversal
+                        ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                        : 'bg-[#C4161C] hover:bg-[#9E1017] text-white cursor-pointer'
+                    }`}
                   >
                     <Undo2 className="size-4" />
-                    Reverse transaction
+                    {selectedEntry.isReversed ? 'Transaction already reversed' : selectedEntry.isReversal ? 'Reversal entry' : 'Reverse transaction'}
                   </button>
                   <button
                     type="button"
                     onClick={() => setActiveFrame('frame1')}
-                    className="w-full py-2 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold transition"
+                    className="w-full py-2 px-4 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold transition cursor-pointer"
                   >
                     Close panel
                   </button>
@@ -864,24 +905,26 @@ export function LedgerPage() {
                         TARGET RECORD
                       </span>
                       <span className="font-mono font-bold text-xs text-neutral-900">
-                        TXN-2026-98124
+                        {selectedEntry.id}
                       </span>
                     </div>
 
                     <div className="text-xs font-bold text-neutral-900 leading-snug">
-                      Metered fare credit - Job BC-10482 (340 Columbia Blvd W → Lethbridge Airport)
+                      {selectedEntry.description}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3 pt-1">
                       <div className="bg-white p-2.5 rounded-lg border border-neutral-200">
                         <div className="text-[9px] font-bold text-neutral-600 uppercase">ORIGINAL MOVEMENT</div>
-                        <div className="text-sm font-black text-emerald-600 mt-0.5">+$19.43 CAD</div>
-                        <div className="text-[10px] text-neutral-600">Credit Entry</div>
+                        <div className="text-sm font-black text-emerald-600 mt-0.5">{selectedEntry.amountFormatted} CAD</div>
+                        <div className="text-[10px] text-neutral-600">{selectedEntry.amount >= 0 ? 'Credit Entry' : 'Debit Entry'}</div>
                       </div>
                       <div className="bg-white p-2.5 rounded-lg border border-neutral-200">
                         <div className="text-[9px] font-bold text-neutral-600 uppercase">DRIVER BALANCE IMPACT</div>
-                        <div className="text-sm font-black text-red-600 mt-0.5">-$19.43 CAD</div>
-                        <div className="text-[10px] text-neutral-600">Restores to $108.97 CAD</div>
+                        <div className="text-sm font-black text-red-600 mt-0.5">
+                          {selectedEntry.amount >= 0 ? `-$${selectedEntry.amount.toFixed(2)}` : `+$${Math.abs(selectedEntry.amount).toFixed(2)}`} CAD
+                        </div>
+                        <div className="text-[10px] text-neutral-600">Restores to balance</div>
                       </div>
                     </div>
 
@@ -957,11 +1000,16 @@ export function LedgerPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setReversalExecuted(true)}
-                      className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition shadow-xs cursor-pointer"
+                      disabled={selectedEntry.isReversed || selectedEntry.isReversal}
+                      onClick={handleExecuteReversal}
+                      className={`flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold transition shadow-xs ${
+                        selectedEntry.isReversed || selectedEntry.isReversal
+                          ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed'
+                          : 'bg-[#C4161C] hover:bg-[#9E1017] text-white cursor-pointer'
+                      }`}
                     >
                       <Undo2 className="size-4" />
-                      Reverse transaction
+                      {selectedEntry.isReversed ? 'Already Reversed' : selectedEntry.isReversal ? 'Cannot Reverse Reversal' : 'Reverse transaction'}
                     </button>
                   </div>
                 </div>

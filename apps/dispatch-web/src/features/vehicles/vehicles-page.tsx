@@ -22,9 +22,12 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface VehicleItem {
   id: string
@@ -174,13 +177,15 @@ const INITIAL_VEHICLES: VehicleItem[] = [
 ]
 
 export function VehiclesPage() {
-  const [vehicles] = useState<VehicleItem[]>(INITIAL_VEHICLES)
+  const [vehicles, setVehicles] = useState<VehicleItem[]>(INITIAL_VEHICLES)
   const [frameState, setFrameState] = useState<'list' | 'detail' | 'drawer' | 'catalog'>('list')
   const [searchQuery, setSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [detailTab, setDetailTab] = useState<'overview' | 'documents'>('overview')
   const [selectedMake, setSelectedMake] = useState<'toyota' | 'honda' | 'dodge' | 'hyundai' | 'chevrolet' | 'ford'>('toyota')
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
 
   // Operational eligibility toggles
   const [ladyEligible, setLadyEligible] = useState(true)
@@ -200,20 +205,70 @@ export function VehiclesPage() {
     vanTag: false,
   })
 
-  const filteredVehicles = vehicles.filter((item) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !item.plate.toLowerCase().includes(q) &&
-        !item.makeModel.toLowerCase().includes(q) &&
-        !item.vin.toLowerCase().includes(q)
-      ) {
-        return false
+  const filteredVehicles = useMemo(() => {
+    return vehicles.filter((item) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        if (
+          !item.plate.toLowerCase().includes(q) &&
+          !item.makeModel.toLowerCase().includes(q) &&
+          !item.vin.toLowerCase().includes(q)
+        ) {
+          return false
+        }
       }
+      if (typeFilter && item.vehicleType !== typeFilter) return false
+      return true
+    })
+  }, [vehicles, searchQuery, typeFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredVehicles.length / pageSize))
+  const pagedVehicles = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredVehicles.slice(start, start + pageSize)
+  }, [filteredVehicles, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'vehicles-registry',
+      data: filteredVehicles,
+      columns: [
+        { header: 'ID', accessor: 'id' },
+        { header: 'Plate', accessor: 'plate' },
+        { header: 'VIN', accessor: 'vin' },
+        { header: 'Make & Model', accessor: 'makeModel' },
+        { header: 'Year', accessor: 'year' },
+        { header: 'Trim & Color', accessor: 'trimColor' },
+        { header: 'Type', accessor: 'vehicleType' },
+        { header: 'Compliance', accessor: 'compliance' },
+        { header: 'Status', accessor: 'status' },
+      ],
+    })
+  }
+
+  const handleSaveVehicle = () => {
+    if (!drawerForm.plate.trim() || !drawerForm.model.trim()) {
+      toast.error('Plate and model are required.')
+      return
     }
-    if (typeFilter && item.vehicleType !== typeFilter) return false
-    return true
-  })
+
+    const newVehicle: VehicleItem = {
+      id: `veh-${Date.now()}`,
+      plate: drawerForm.plate.toUpperCase(),
+      vin: drawerForm.vin ? `VIN ...${drawerForm.vin.slice(-4)}` : 'VIN ...0000',
+      makeModel: `${drawerForm.year} ${drawerForm.make} ${drawerForm.model}`,
+      year: parseInt(drawerForm.year, 10) || 2024,
+      trimColor: `${drawerForm.color} · ${drawerForm.classification}`,
+      vehicleType: drawerForm.vanTag ? 'Van 6+' : 'Sedan',
+      assignedDriver: null,
+      compliance: 'VERIFIED',
+      status: 'ACTIVE',
+    }
+
+    setVehicles((prev) => [newVehicle, ...prev])
+    toast.success(`Vehicle ${newVehicle.plate} (${newVehicle.makeModel}) added to registry.`)
+    setFrameState('list')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -365,6 +420,7 @@ export function VehiclesPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={handleExportCsv}
                 className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 shadow-2xs cursor-pointer"
               >
                 <Download className="size-3.5" />
@@ -428,14 +484,20 @@ export function VehiclesPage() {
                       type="text"
                       placeholder="Search plate, make, model, VIN..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="h-9 w-full rounded-xl border border-neutral-200 bg-neutral-50/60 pl-9 pr-3 text-xs text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#C4161C] focus:bg-white focus:ring-1 focus:ring-[#C4161C]"
                     />
                   </div>
 
                   <select
                     value={typeFilter}
-                    onChange={(e) => setTypeFilter(e.target.value)}
+                    onChange={(e) => {
+                      setTypeFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-700 outline-none"
                   >
                     <option value="">All Types (74)</option>
@@ -447,7 +509,10 @@ export function VehiclesPage() {
 
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-700 outline-none"
                   >
                     <option value="">All Statuses</option>
@@ -484,7 +549,7 @@ export function VehiclesPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {filteredVehicles.map((vehicle) => {
+                    {pagedVehicles.map((vehicle) => {
                       return (
                         <tr
                           key={vehicle.id}
@@ -584,48 +649,17 @@ export function VehiclesPage() {
                 {/* Table Footer */}
                 <footer className="flex flex-wrap items-center justify-between border-t border-neutral-200 px-4 py-3 bg-neutral-50/50 text-xs">
                   <div className="text-neutral-500 text-[11px]">
-                    Showing 1–{filteredVehicles.length} of 74 vehicles{' '}
+                    Showing {pagedVehicles.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, 74)} of 74 vehicles{' '}
                     <span className="font-mono text-neutral-400">REG-ID: #AB-YQL-FLEET-2026</span>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-400 text-xs disabled:opacity-50"
-                    >
-                      &lt; Previous
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded bg-[#C4161C] text-white font-bold text-xs shadow-xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      4
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      Next &gt;
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={Math.max(totalPages, 10)}
+                    totalItems={74}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                 </footer>
               </div>
             </div>
@@ -671,6 +705,9 @@ export function VehiclesPage() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => {
+                        toast.info('Vehicle ABC-123 deactivated and removed from active dispatch pool.')
+                      }}
                       className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3.5 py-2 text-xs font-bold text-[#C4161C] hover:bg-red-50 shadow-2xs cursor-pointer"
                     >
                       <XCircle className="size-3.5" />
@@ -1532,8 +1569,8 @@ export function VehiclesPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFrameState('list')}
-                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs"
+                  onClick={handleSaveVehicle}
+                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                 >
                   ✔ Save Vehicle
                 </button>

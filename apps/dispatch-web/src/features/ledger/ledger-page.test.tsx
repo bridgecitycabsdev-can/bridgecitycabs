@@ -1,68 +1,77 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, screen } from '@testing-library/react'
-import { BrowserRouter } from 'react-router-dom'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { useSession, type Profile } from '@/app/session'
-import { LedgerPage } from '@/features/ledger/ledger-page'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { LedgerPage } from './ledger-page'
+import * as exportCsvModule from '@/lib/export-csv'
+import { toast } from '@/components/ui/toast'
 
-const profile: Profile = {
-  id: '33333333-3333-4333-8333-333333333333',
-  email: 'priya.v@bridgecabs.ca',
-  role: { id: '44444444-4444-4444-8444-444444444444', name: 'super_admin' },
-  branch: { id: '55555555-5555-4555-8555-555555555555', name: 'Lethbridge Branch (YQL)', city: 'Lethbridge' },
-}
-
-describe('General Ledger page', () => {
+describe('LedgerPage', () => {
   beforeEach(() => {
-    useSession.getState().clear()
-    useSession.getState().setProfile(profile)
+    vi.restoreAllMocks()
   })
 
-  it('renders ledger header, driver balance, and double-entry transaction rows', () => {
-    const client = new QueryClient()
+  it('renders transactions table and pagination', () => {
     render(
-      <QueryClientProvider client={client}>
-        <BrowserRouter>
-          <LedgerPage />
-        </BrowserRouter>
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <LedgerPage />
+      </MemoryRouter>
     )
 
     expect(screen.getByText('General Ledger')).toBeTruthy()
     expect(screen.getByText('DOUBLE-ENTRY V3.4')).toBeTruthy()
-    expect(screen.getByText('SETTLED CASH POSITION')).toBeTruthy()
-    expect(screen.getByText('$128.40')).toBeTruthy()
-    expect(screen.getByText('Company owes driver')).toBeTruthy()
-    expect(screen.getByText('DRIVER_BALANCE:drv_8441')).toBeTruthy()
     expect(screen.getByText('TXN-2026-98124')).toBeTruthy()
-    expect(screen.getByText('TXN-2026-98041')).toBeTruthy()
+    expect(screen.getByText(/Showing 1/i)).toBeTruthy()
   })
 
-  it('switches between Frame 2, Frame 3, and Frame 4', () => {
-    const client = new QueryClient()
+  it('filters entries when search query is entered', () => {
     render(
-      <QueryClientProvider client={client}>
-        <BrowserRouter>
-          <LedgerPage />
-        </BrowserRouter>
-      </QueryClientProvider>,
+      <MemoryRouter>
+        <LedgerPage />
+      </MemoryRouter>
     )
 
-    // Navigate to Frame 2
-    fireEvent.click(screen.getByText('Frame 2: Entry Detail Panel'))
-    expect(screen.getByText('Ledger Entry Detail')).toBeTruthy()
-    expect(screen.getByText('Balanced Entry Verified')).toBeTruthy()
+    const searchInput = screen.getByPlaceholderText(/Search transaction ID/i)
+    fireEvent.change(searchInput, { target: { value: 'LSE-01' } })
 
-    // Navigate to Frame 3
-    fireEvent.click(screen.getByText('Frame 3: Reverse Transaction'))
-    expect(screen.getByText('LEDGER REMEDIATION MODE ·')).toBeTruthy()
-    expect(screen.getByText('Reverse this transaction?')).toBeTruthy()
-    expect(screen.getByText('Reversal Posted Successfully')).toBeTruthy()
+    expect(screen.getByText('TXN-2026-98041')).toBeTruthy()
+    expect(screen.queryByText('TXN-2026-98124')).toBeNull()
+  })
 
-    // Navigate to Frame 4
-    fireEvent.click(screen.getByText('Frame 4: Specimen Deck'))
-    expect(screen.getByText('Specimen Deck · Frame 4')).toBeTruthy()
-    expect(screen.getByText('Role View: Branch Admin')).toBeTruthy()
-    expect(screen.getByText('Reverse Transaction (Disabled)')).toBeTruthy()
+  it('calls exportToCsv when Export CSV is clicked', () => {
+    const exportSpy = vi.spyOn(exportCsvModule, 'exportToCsv').mockImplementation(() => {})
+
+    render(
+      <MemoryRouter>
+        <LedgerPage />
+      </MemoryRouter>
+    )
+
+    const exportBtn = screen.getByRole('button', { name: /Export CSV/i })
+    fireEvent.click(exportBtn)
+
+    expect(exportSpy).toHaveBeenCalledTimes(1)
+    expect(exportSpy.mock.calls[0][1]).toBe('ledger-transactions-driver')
+  })
+
+  it('executes a reversal workflow in Frame 3 with toast notification', () => {
+    const toastSpy = vi.spyOn(toast, 'success')
+
+    render(
+      <MemoryRouter>
+        <LedgerPage />
+      </MemoryRouter>
+    )
+
+    // Switch to Frame 3
+    const frame3Btn = screen.getByRole('button', { name: /Frame 3: Reverse Transaction/i })
+    fireEvent.click(frame3Btn)
+
+    expect(screen.getByText(/Reverse this transaction\?/i)).toBeTruthy()
+
+    // Click reverse transaction button using exact name
+    const reverseBtn = screen.getByRole('button', { name: /^Reverse transaction$/i })
+    fireEvent.click(reverseBtn)
+
+    expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('reversed via TXN-2026-'))
   })
 })

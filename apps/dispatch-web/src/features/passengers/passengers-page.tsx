@@ -21,8 +21,11 @@ import {
   X,
   XCircle,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface PassengerItem {
   id: string
@@ -147,11 +150,13 @@ const INITIAL_PASSENGERS: PassengerItem[] = [
 ]
 
 export function PassengersPage() {
-  const [passengers] = useState<PassengerItem[]>(INITIAL_PASSENGERS)
+  const [passengers, setPassengers] = useState<PassengerItem[]>(INITIAL_PASSENGERS)
   const [selectedPax, setSelectedPax] = useState<PassengerItem>(INITIAL_PASSENGERS[0])
   const [frameState, setFrameState] = useState<'list' | 'detail' | 'drawer' | 'empty' | 'skeleton'>('list')
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
 
   // Edit / Add Drawer Form
   const [paxForm, setPaxForm] = useState({
@@ -166,20 +171,77 @@ export function PassengersPage() {
 
   const [collisionActive, setCollisionActive] = useState(true)
 
-  const filtered = passengers.filter((item) => {
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase()
-      if (
-        !item.name.toLowerCase().includes(q) &&
-        !item.phone.toLowerCase().includes(q) &&
-        !item.email.toLowerCase().includes(q)
-      ) {
-        return false
+  const filtered = useMemo(() => {
+    return passengers.filter((item) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase()
+        if (
+          !item.name.toLowerCase().includes(q) &&
+          !item.phone.toLowerCase().includes(q) &&
+          !item.email.toLowerCase().includes(q)
+        ) {
+          return false
+        }
       }
+      if (statusFilter && item.status !== statusFilter) return false
+      return true
+    })
+  }, [passengers, searchQuery, statusFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const pagedPassengers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'passengers-directory',
+      data: filtered,
+      columns: [
+        { header: 'ID', accessor: 'id' },
+        { header: 'Name', accessor: 'name' },
+        { header: 'Phone', accessor: 'phone' },
+        { header: 'Email', accessor: 'email' },
+        { header: 'Total Trips', accessor: 'trips' },
+        { header: 'Rating', accessor: 'rating' },
+        { header: 'Status', accessor: 'status' },
+        { header: 'Registered', accessor: 'registered' },
+      ],
+    })
+  }
+
+  const handleSavePassenger = () => {
+    if (!paxForm.name.trim() || !paxForm.phone.trim()) {
+      toast.error('Name and phone number are required.')
+      return
     }
-    if (statusFilter && item.status !== statusFilter) return false
-    return true
-  })
+    const initials = paxForm.name
+      .split(' ')
+      .map((w) => w[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase()
+
+    const newPax: PassengerItem = {
+      id: `pax-${Date.now()}`,
+      name: paxForm.name,
+      initials: initials || 'PX',
+      tagline: 'Registered rider · Lethbridge Branch',
+      phone: paxForm.phone,
+      email: paxForm.email || 'passenger@email.ca',
+      trips: 0,
+      rating: 5.0,
+      status: 'Active',
+      registered: 'Today',
+      isVerified: true,
+      notes: paxForm.notes,
+    }
+
+    setPassengers((prev) => [newPax, ...prev])
+    toast.success(`Passenger ${paxForm.name} saved successfully.`)
+    setFrameState('list')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -330,6 +392,7 @@ export function PassengersPage() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    onClick={handleExportCsv}
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 shadow-2xs cursor-pointer"
                   >
                     <Download className="size-3.5" />
@@ -356,14 +419,20 @@ export function PassengersPage() {
                         type="text"
                         placeholder="Search by passenger name, phone or email..."
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value)
+                          setCurrentPage(1)
+                        }}
                         className="h-9 w-full rounded-xl border border-neutral-200 bg-neutral-50/60 pl-9 pr-3 text-xs text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-[#C4161C] focus:bg-white focus:ring-1 focus:ring-[#C4161C]"
                       />
                     </div>
 
                     <select
                       value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
+                      onChange={(e) => {
+                        setStatusFilter(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="h-9 rounded-xl border border-neutral-200 bg-white px-3 text-xs font-medium text-neutral-700 outline-none"
                     >
                       <option value="">All Statuses (Active, Blocked)</option>
@@ -380,8 +449,9 @@ export function PassengersPage() {
                       onClick={() => {
                         setSearchQuery('')
                         setStatusFilter('')
+                        setCurrentPage(1)
                       }}
-                      className="text-xs font-semibold text-[#C4161C] hover:underline"
+                      className="text-xs font-semibold text-[#C4161C] hover:underline cursor-pointer"
                     >
                       Reset filters
                     </button>
@@ -420,7 +490,7 @@ export function PassengersPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
-                    {filtered.map((pax) => {
+                    {pagedPassengers.map((pax) => {
                       const isBlocked = pax.status === 'Blocked'
                       return (
                         <tr
@@ -500,60 +570,16 @@ export function PassengersPage() {
                 {/* Footer */}
                 <footer className="flex flex-wrap items-center justify-between border-t border-neutral-200 px-4 py-3 bg-neutral-50/50 text-xs">
                   <div className="text-neutral-500 text-[11px]">
-                    Showing 1–{filtered.length} of 1,284 passengers
+                    Showing {pagedPassengers.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, 1284)} of 1,284 passengers
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      disabled
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-400 text-xs disabled:opacity-50"
-                    >
-                      &lt; Previous
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded bg-[#C4161C] text-white font-bold text-xs shadow-xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      4
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      5
-                    </button>
-                    <span className="px-1 text-neutral-400">…</span>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      65
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-700 hover:bg-neutral-100 text-xs"
-                    >
-                      Next &gt;
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={1284}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                   <div className="text-neutral-400 text-[10px]">
                     Customer data encrypted under Alberta PIPA standards.
                   </div>
@@ -620,10 +646,22 @@ export function PassengersPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => {
+                          const newStatus = selectedPax.status === 'Active' ? 'Blocked' : 'Active'
+                          setSelectedPax({ ...selectedPax, status: newStatus })
+                          setPassengers((prev) =>
+                            prev.map((p) => (p.id === selectedPax.id ? { ...p, status: newStatus } : p))
+                          )
+                          if (newStatus === 'Blocked') {
+                            toast.error(`Passenger ${selectedPax.name} has been blocked from booking.`)
+                          } else {
+                            toast.success(`Passenger ${selectedPax.name} account unblocked.`)
+                          }
+                        }}
                         className="flex items-center gap-1.5 rounded-xl border border-red-200 bg-white px-3.5 py-1.5 text-xs font-bold text-[#C4161C] hover:bg-red-50 shadow-2xs cursor-pointer"
                       >
                         <XCircle className="size-3.5" />
-                        <span>Block</span>
+                        <span>{selectedPax.status === 'Active' ? 'Block' : 'Unblock'}</span>
                       </button>
                     </div>
                     <div className="text-[10px] text-neutral-400">
@@ -1057,8 +1095,8 @@ export function PassengersPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFrameState('list')}
-                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs"
+                  onClick={handleSavePassenger}
+                  className="rounded-xl bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                 >
                   ✔ Save passenger
                 </button>

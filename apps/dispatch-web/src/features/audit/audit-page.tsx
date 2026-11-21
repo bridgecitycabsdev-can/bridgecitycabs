@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   Database,
+  Download,
   Filter,
   Lock,
   RefreshCw,
@@ -16,9 +17,12 @@ import {
   User,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface AuditLogEntry {
   id: string
@@ -176,7 +180,44 @@ export function AuditPage() {
   const [selectedEntityFilter, setSelectedEntityFilter] = useState('Fare Rule')
   const [selectedActorFilter, setSelectedActorFilter] = useState('Priya V.')
   const [selectedDateFilter, setSelectedDateFilter] = useState('Last 72 Hours')
+  const [entityIdInput, setEntityIdInput] = useState('fr_rule_8812')
+  const [actorInput, setActorInput] = useState('Priya V. (adm_01)')
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
+
+  const filteredLogs = useMemo(() => {
+    return AUDIT_LOGS.filter((entry) => {
+      if (selectedEntityFilter !== 'All' && selectedEntityFilter !== 'Fare Rule') {
+        if (!entry.entityType.toLowerCase().includes(selectedEntityFilter.toLowerCase())) {
+          return false
+        }
+      }
+      return true
+    })
+  }, [selectedEntityFilter])
+
+  const pagedLogs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredLogs.slice(start, start + pageSize)
+  }, [filteredLogs, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'audit-log-export',
+      data: filteredLogs,
+      columns: [
+        { header: 'Sequence ID', accessor: 'sequenceId' },
+        { header: 'Timestamp', accessor: 'timestamp' },
+        { header: 'Actor Name', accessor: 'actorName' },
+        { header: 'Actor Role', accessor: 'actorRole' },
+        { header: 'Action', accessor: 'action' },
+        { header: 'Entity Type', accessor: 'entityType' },
+        { header: 'Entity ID', accessor: 'entityId' },
+        { header: 'Summary', accessor: 'summary' },
+      ],
+    })
+  }
 
   const getActionBadgeClass = (action: AuditLogEntry['action']) => {
     switch (action) {
@@ -378,6 +419,14 @@ export function AuditPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-50 text-xs font-bold text-neutral-700 shadow-2xs transition cursor-pointer"
+                  >
+                    <Download className="size-3.5 text-neutral-500" />
+                    <span>Export CSV</span>
+                  </button>
                   <div className="flex size-9 items-center justify-center rounded-xl bg-red-100 text-[#C4161C] shrink-0">
                     <Database className="size-5" />
                   </div>
@@ -415,7 +464,9 @@ export function AuditPage() {
                     <label className="text-[10px] font-extrabold uppercase text-neutral-600">ENTITY ID</label>
                     <input
                       type="text"
-                      defaultValue="fr_rule_8812"
+                      value={entityIdInput}
+                      onChange={(e) => setEntityIdInput(e.target.value)}
+                      placeholder="fr_rule_8812"
                       className="mt-1 w-full p-2 rounded-xl border border-neutral-300 font-mono text-xs text-neutral-800"
                     />
                   </div>
@@ -426,7 +477,9 @@ export function AuditPage() {
                       <User className="size-3.5 text-neutral-400 absolute left-2.5 top-2.5" />
                       <input
                         type="text"
-                        defaultValue="Priya V. (adm_01)"
+                        value={actorInput}
+                        onChange={(e) => setActorInput(e.target.value)}
+                        placeholder="Priya V. (adm_01)"
                         className="w-full pl-8 pr-2.5 py-2 rounded-xl border border-neutral-300 text-xs text-neutral-800"
                       />
                     </div>
@@ -449,6 +502,10 @@ export function AuditPage() {
                   <div className="flex items-end gap-2">
                     <button
                       type="button"
+                      onClick={() => {
+                        setCurrentPage(1)
+                        toast.success('Audit filter applied.')
+                      }}
                       className="flex-1 py-2 px-3 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] text-white text-xs font-bold transition shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
                     >
                       <Filter className="size-3.5" />
@@ -460,6 +517,10 @@ export function AuditPage() {
                         setSelectedEntityFilter('Fare Rule')
                         setSelectedActorFilter('Priya V.')
                         setSelectedDateFilter('Last 72 Hours')
+                        setEntityIdInput('')
+                        setActorInput('')
+                        setCurrentPage(1)
+                        toast.info('Audit filters reset to default.')
                       }}
                       className="py-2 px-3 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-50 text-xs font-bold text-neutral-700 flex items-center gap-1 cursor-pointer"
                     >
@@ -530,7 +591,7 @@ export function AuditPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100 font-medium">
-                      {AUDIT_LOGS.map((entry, idx) => {
+                      {pagedLogs.map((entry, idx) => {
                         const isSelected = selectedEntry?.id === entry.id
                         return (
                           <tr
@@ -609,7 +670,7 @@ export function AuditPage() {
                   <div className="flex items-center gap-2 text-neutral-600">
                     <ShieldCheck className="size-4 text-emerald-600" />
                     <span>
-                      Showing <strong>1-10</strong> of 48,219 entries
+                      Showing <strong>{pagedLogs.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}-{Math.min(currentPage * pageSize, 48219)}</strong> of 48,219 entries
                     </span>
                     <span>•</span>
                     <span className="font-mono text-neutral-400">Hash Chain Verified [SHA-256 Valid]</span>
@@ -618,42 +679,21 @@ export function AuditPage() {
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
+                      onClick={() => toast.info('Loading additional blockchain ledger entries...')}
                       className="px-3 py-1.5 rounded-lg border border-neutral-300 bg-white font-bold text-neutral-700 hover:bg-neutral-50 shadow-2xs flex items-center gap-1 cursor-pointer"
                     >
                       <span>Load more entries</span>
                       <span>↓</span>
                     </button>
 
-                    <div className="flex items-center gap-1 text-[11px]">
-                      <button type="button" className="px-2 py-1 rounded bg-[#C4161C] text-white font-bold">
-                        1
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2 py-1 rounded border border-neutral-300 bg-white text-neutral-700"
-                      >
-                        2
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2 py-1 rounded border border-neutral-300 bg-white text-neutral-700"
-                      >
-                        3
-                      </button>
-                      <span>...</span>
-                      <button
-                        type="button"
-                        className="px-2 py-1 rounded border border-neutral-300 bg-white text-neutral-700"
-                      >
-                        4822
-                      </button>
-                      <button
-                        type="button"
-                        className="px-2 py-1 rounded border border-neutral-300 bg-white text-neutral-700"
-                      >
-                        &gt;
-                      </button>
-                    </div>
+                    <TablePagination
+                      currentPage={currentPage}
+                      totalPages={4822}
+                      totalItems={48219}
+                      pageSize={pageSize}
+                      onPageChange={setCurrentPage}
+                      className="border-0 p-0 bg-transparent shadow-none"
+                    />
                   </div>
                 </div>
               </div>

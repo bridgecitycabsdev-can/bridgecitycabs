@@ -29,6 +29,9 @@ import {
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface LeaseCardItem {
   id: string
@@ -179,15 +182,22 @@ const DEFAULT_LEASES: LeaseCardItem[] = [
 
 export function LeasesPage() {
   const navigate = useNavigate()
+  const [leases, setLeases] = useState<LeaseCardItem[]>(DEFAULT_LEASES)
   const [activeFrame, setActiveFrame] = useState<'frame1' | 'frame2' | 'frame3' | 'frame4'>('frame1')
   const [statusFilter, setStatusFilter] = useState<string>('ALL')
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<string>('ALL')
   const [searchQuery, setSearchQuery] = useState('')
   const [copiedId, setCopiedId] = useState(false)
   const [showConflictResolved, setShowConflictResolved] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 6
+
+  // Form fields for creating lease
+  const [newLeaseDriver] = useState('Harpreet Singh')
+  const [newLeaseWeeklyRate, setNewLeaseWeeklyRate] = useState('320.00')
 
   // Filter leases
-  const filteredLeases = DEFAULT_LEASES.filter((lease) => {
+  const filteredLeases = leases.filter((lease) => {
     if (statusFilter !== 'ALL' && lease.status !== statusFilter) return false
     if (vehicleTypeFilter !== 'ALL' && lease.vehicleType !== vehicleTypeFilter) return false
     if (searchQuery.trim()) {
@@ -202,6 +212,86 @@ export function LeasesPage() {
     }
     return true
   })
+
+  const totalPages = Math.max(1, Math.ceil(filteredLeases.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const pagedLeases = filteredLeases.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize,
+  )
+  const showingStart = filteredLeases.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1
+  const showingEnd = Math.min(safeCurrentPage * pageSize, filteredLeases.length)
+
+  const handleExportCSV = () => {
+    const headers = [
+      'ID',
+      'Driver Name',
+      'Unit #',
+      'Vehicle',
+      'Plate',
+      'Weekly Rate ($)',
+      'Start Date',
+      'End Date',
+      'Status',
+    ]
+    const rows = filteredLeases.map((l) => [
+      l.id,
+      l.driverName,
+      l.unitId,
+      l.vehicleName,
+      l.plateNumber,
+      l.weeklyRate,
+      l.startDate,
+      l.endDate,
+      l.status,
+    ])
+    exportToCsv('fleet-vehicle-leases.csv', headers, rows)
+  }
+
+  const handleResetFilters = () => {
+    setSearchQuery('')
+    setStatusFilter('ALL')
+    setVehicleTypeFilter('ALL')
+    setCurrentPage(1)
+    toast.info('Filters Reset', 'Leases list reset to default.')
+  }
+
+  const handleCreateLease = () => {
+    if (!newLeaseDriver.trim()) {
+      toast.error('Validation Error', 'Please enter a driver name.')
+      return
+    }
+    const rateNum = parseFloat(newLeaseWeeklyRate) || 320
+    const newId = `LSE-2026-${Math.floor(100 + Math.random() * 900)}`
+    const newLease: LeaseCardItem = {
+      id: newId,
+      driverName: newLeaseDriver,
+      initials: newLeaseDriver
+        .split(' ')
+        .map((w) => w[0])
+        .join('')
+        .slice(0, 2)
+        .toUpperCase(),
+      unitId: `U-${Math.floor(200 + Math.random() * 100)}`,
+      vehicleName: '2023 Prius Prime Hybrid',
+      plateNumber: 'YQL-892',
+      fleetNumber: 'V-112',
+      vehicleType: 'Hybrid',
+      weeklyRate: rateNum,
+      weeklyRateFormatted: `$${rateNum.toFixed(2)}`,
+      startDate: '1 Dec 2026',
+      endDate: '30 Nov 2027',
+      progressWeeks: 1,
+      totalWeeks: 52,
+      progressPercent: 2,
+      status: 'ACTIVE',
+      lastDeductionText: 'Scheduled: 8 Dec, $320.00',
+    }
+    setLeases((prev) => [newLease, ...prev])
+    toast.success('Lease Contract Created', `Contract for ${newLeaseDriver} issued successfully.`)
+    setActiveFrame('frame1')
+    setCurrentPage(1)
+  }
 
   const copyLeaseId = (text: string) => {
     navigator.clipboard?.writeText(text)
@@ -339,7 +429,8 @@ export function LeasesPage() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition"
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
                   >
                     <Download className="size-3.5" />
                     Export CSV
@@ -447,14 +538,20 @@ export function LeasesPage() {
                       type="text"
                       placeholder="Search driver, vehicle, unit #..."
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value)
+                        setCurrentPage(1)
+                      }}
                       className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-neutral-300 focus:outline-none focus:border-[#C4161C]"
                     />
                   </div>
 
                   <select
                     value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="px-3 py-1.5 rounded-lg border border-neutral-300 bg-white text-xs font-semibold text-neutral-700"
                   >
                     <option value="ALL">All Statuses (Active, Pending, Ended, Terminated)</option>
@@ -466,7 +563,10 @@ export function LeasesPage() {
 
                   <select
                     value={vehicleTypeFilter}
-                    onChange={(e) => setVehicleTypeFilter(e.target.value)}
+                    onChange={(e) => {
+                      setVehicleTypeFilter(e.target.value)
+                      setCurrentPage(1)
+                    }}
                     className="px-3 py-1.5 rounded-lg border border-neutral-300 bg-white text-xs font-semibold text-neutral-700"
                   >
                     <option value="ALL">All Vehicle Types (Sedan, Hybrid, WAV, SUV)</option>
@@ -478,12 +578,8 @@ export function LeasesPage() {
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setStatusFilter('ALL')
-                      setVehicleTypeFilter('ALL')
-                      setSearchQuery('')
-                    }}
-                    className="text-xs text-neutral-500 hover:text-neutral-800 flex items-center gap-1 font-semibold"
+                    onClick={handleResetFilters}
+                    className="text-xs text-neutral-500 hover:text-neutral-800 flex items-center gap-1 font-semibold cursor-pointer"
                   >
                     <RotateCcw className="size-3" />
                     Reset Filters
@@ -502,7 +598,7 @@ export function LeasesPage() {
 
               {/* 6 Leases Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                {filteredLeases.map((lease) => (
+                {pagedLeases.map((lease) => (
                   <div
                     key={lease.id}
                     onClick={() => setActiveFrame('frame2')}
@@ -616,42 +712,17 @@ export function LeasesPage() {
               </div>
 
               {/* Pagination */}
-              <div className="p-4 bg-white rounded-xl border border-neutral-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-neutral-500">
-                <div>
-                  Showing 1–6 of 31 active fleet leases · Lethbridge Fleet Lease Ledger #LSE-2026-YQL
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                  >
-                    &lt; Prev
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2.5 py-1 rounded bg-[#C4161C] text-white font-bold"
-                  >
-                    1
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                  >
-                    2
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                  >
-                    3
-                  </button>
-                  <button
-                    type="button"
-                    className="px-2.5 py-1 rounded border border-neutral-300 text-neutral-600 hover:bg-neutral-50 font-semibold"
-                  >
-                    Next &gt;
-                  </button>
-                </div>
+              <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-2xs">
+                <TablePagination
+                  currentPage={safeCurrentPage}
+                  totalPages={totalPages}
+                  onPageChange={setCurrentPage}
+                  showingStart={showingStart}
+                  showingEnd={showingEnd}
+                  totalCount={filteredLeases.length}
+                  entityName="active fleet leases"
+                  ledgerCode="Lethbridge Fleet Lease Ledger #LSE-2026-YQL"
+                />
               </div>
 
               {/* Auxiliary State Previews Header */}
@@ -1338,7 +1409,8 @@ export function LeasesPage() {
                         </label>
                         <input
                           type="text"
-                          defaultValue="$320.00"
+                          value={newLeaseWeeklyRate}
+                          onChange={(e) => setNewLeaseWeeklyRate(e.target.value)}
                           className="w-full px-3 py-2 rounded-lg border border-neutral-300 text-xs font-mono font-bold"
                         />
                       </div>
@@ -1367,7 +1439,7 @@ export function LeasesPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setActiveFrame('frame1')}
+                      onClick={handleCreateLease}
                       className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-xs font-bold text-white bg-[#C4161C] hover:bg-[#9E1017] transition shadow-xs cursor-pointer"
                     >
                       <Check className="size-4" />

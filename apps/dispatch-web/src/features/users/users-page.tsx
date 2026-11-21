@@ -5,6 +5,7 @@ import {
   Building2,
   Check,
   CheckCircle2,
+  Download,
   ExternalLink,
   Headphones,
   Landmark,
@@ -18,9 +19,12 @@ import {
   UserCheck,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface StaffUser {
   id: string
@@ -122,6 +126,7 @@ const STAFF_USERS: StaffUser[] = [
 
 export function UsersPage() {
   const navigate = useNavigate()
+  const [users, setUsers] = useState<StaffUser[]>(STAFF_USERS)
   const [activeFrame, setActiveFrame] = useState<'frame1' | 'frame2' | 'frame3' | 'frame4'>('frame1')
   const [selectedUser, setSelectedUser] = useState<StaffUser>(STAFF_USERS[1])
   const [newSelectedRole, setNewSelectedRole] = useState<'Super admin' | 'Branch admin' | 'Accounts admin' | 'Dispatcher' | 'Customer care'>('Branch admin')
@@ -129,6 +134,50 @@ export function UsersPage() {
   const [roleFilter, setRoleFilter] = useState('ALL')
   const [branchFilter, setBranchFilter] = useState('ALL')
   const [isRoleModalOpen, setIsRoleModalOpen] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
+
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase()
+        const matches =
+          user.name.toLowerCase().includes(q) ||
+          user.email.toLowerCase().includes(q) ||
+          user.id.toLowerCase().includes(q)
+        if (!matches) return false
+      }
+      if (roleFilter !== 'ALL' && user.role !== roleFilter) {
+        return false
+      }
+      if (branchFilter !== 'ALL' && !user.branch.toLowerCase().includes(branchFilter.toLowerCase())) {
+        return false
+      }
+      return true
+    })
+  }, [users, searchQuery, roleFilter, branchFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
+  const pagedUsers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredUsers.slice(start, start + pageSize)
+  }, [filteredUsers, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'users-staff-directory',
+      data: filteredUsers,
+      columns: [
+        { header: 'Staff ID', accessor: 'id' },
+        { header: 'Name', accessor: 'name' },
+        { header: 'Email', accessor: 'email' },
+        { header: 'Branch', accessor: 'branch' },
+        { header: 'Role', accessor: 'role' },
+        { header: 'Role Tier', accessor: 'roleTier' },
+        { header: 'Last Sign-In', accessor: 'lastSignIn' },
+      ],
+    })
+  }
 
   const getRoleBadge = (role: StaffUser['role']) => {
     switch (role) {
@@ -156,6 +205,27 @@ export function UsersPage() {
   }
 
   const handleUpdateRole = () => {
+    setUsers((prev) =>
+      prev.map((u) =>
+        u.id === selectedUser.id
+          ? {
+              ...u,
+              role: newSelectedRole,
+              roleTier:
+                newSelectedRole === 'Super admin'
+                  ? 'Tier 0 (Root)'
+                  : newSelectedRole === 'Branch admin'
+                  ? 'Tier 1 (Branch Head)'
+                  : newSelectedRole === 'Accounts admin'
+                  ? 'Tier 2 (Finance)'
+                  : newSelectedRole === 'Dispatcher'
+                  ? 'Tier 2 (CAD Lead)'
+                  : 'Tier 3 (Support)',
+            }
+          : u,
+      ),
+    )
+    toast.success(`Role updated to ${newSelectedRole} for ${selectedUser.name}. Permissions propagated across dispatch nodes.`)
     setIsRoleModalOpen(false)
     setActiveFrame('frame3')
   }
@@ -298,6 +368,14 @@ export function UsersPage() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportCsv}
+                    className="px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 text-neutral-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+                  >
+                    <Download className="size-3.5 text-neutral-500" />
+                    <span>Export CSV</span>
+                  </button>
                   <span className="px-3 py-1.5 rounded-lg border border-neutral-300 bg-white text-neutral-700 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
                     <Lock className="size-3 text-emerald-600" />
                     <span>Federated Provisioning (Okta Active)</span>
@@ -388,7 +466,7 @@ export function UsersPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100 font-medium">
-                      {STAFF_USERS.map((user) => (
+                      {pagedUsers.map((user) => (
                         <tr key={user.id} className="hover:bg-neutral-50 transition">
                           <td className="py-3.5 px-4 whitespace-nowrap">
                             <div className="flex items-center gap-3">
@@ -472,29 +550,20 @@ export function UsersPage() {
                   <div className="flex items-center gap-2">
                     <span className="size-2 rounded-full bg-emerald-500" />
                     <span>
-                      Showing <strong>1-8</strong> of 18 staff users
+                      Showing <strong>{pagedUsers.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}-{Math.min(currentPage * pageSize, filteredUsers.length)}</strong> of {filteredUsers.length} staff users
                     </span>
                     <span>•</span>
                     <span className="text-[11px]">SSO Directory Sync: 4 mins ago</span>
                   </div>
 
-                  <div className="flex items-center gap-1 text-[11px]">
-                    <button type="button" className="px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-500">
-                      Prev
-                    </button>
-                    <button type="button" className="px-2 py-0.5 rounded bg-[#C4161C] text-white font-bold">
-                      1
-                    </button>
-                    <button type="button" className="px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-700">
-                      2
-                    </button>
-                    <button type="button" className="px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-700">
-                      3
-                    </button>
-                    <button type="button" className="px-2 py-0.5 rounded border border-neutral-300 bg-white text-neutral-700">
-                      Next
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={totalPages}
+                    totalItems={filteredUsers.length}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                 </div>
               </div>
 

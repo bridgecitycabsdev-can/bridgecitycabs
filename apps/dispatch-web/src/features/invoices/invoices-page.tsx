@@ -21,8 +21,11 @@ import {
   Search,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface InvoiceItem {
   id: string
@@ -158,29 +161,70 @@ const DEFAULT_INVOICES: InvoiceItem[] = [
 ]
 
 export function InvoicesPage() {
+  const [invoices, setInvoices] = useState<InvoiceItem[]>(DEFAULT_INVOICES)
   const [frameState, setFrameState] = useState<'list' | 'draftDrawer' | 'detail' | 'paymentDrawer' | 'variants'>('list')
   const [sandboxView, setSandboxView] = useState<'normal' | 'skeleton' | 'empty'>('normal')
   const [activeTab, setActiveTab] = useState<'all' | 'draft' | 'sent' | 'partial' | 'paid' | 'overdue' | 'void'>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [entityScope, setEntityScope] = useState<'single' | 'group'>('single')
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
 
-  const filteredInvoices = DEFAULT_INVOICES.filter((inv) => {
-    if (activeTab === 'draft' && inv.status !== 'DRAFT') return false
-    if (activeTab === 'sent' && inv.status !== 'SENT') return false
-    if (activeTab === 'partial' && inv.status !== 'PARTIALLY_PAID') return false
-    if (activeTab === 'paid' && inv.status !== 'PAID') return false
-    if (activeTab === 'overdue' && inv.status !== 'OVERDUE') return false
-    if (activeTab === 'void' && inv.status !== 'VOID') return false
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      return (
-        inv.id.toLowerCase().includes(q) ||
-        inv.accountName.toLowerCase().includes(q) ||
-        inv.accountSubtext.toLowerCase().includes(q)
-      )
-    }
-    return true
-  })
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter((inv) => {
+      if (activeTab === 'draft' && inv.status !== 'DRAFT') return false
+      if (activeTab === 'sent' && inv.status !== 'SENT') return false
+      if (activeTab === 'partial' && inv.status !== 'PARTIALLY_PAID') return false
+      if (activeTab === 'paid' && inv.status !== 'PAID') return false
+      if (activeTab === 'overdue' && inv.status !== 'OVERDUE') return false
+      if (activeTab === 'void' && inv.status !== 'VOID') return false
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase()
+        return (
+          inv.id.toLowerCase().includes(q) ||
+          inv.accountName.toLowerCase().includes(q) ||
+          inv.accountSubtext.toLowerCase().includes(q)
+        )
+      }
+      return true
+    })
+  }, [invoices, activeTab, searchQuery])
+
+  const totalPages = Math.max(1, Math.ceil(filteredInvoices.length / pageSize))
+  const pagedInvoices = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filteredInvoices.slice(start, start + pageSize)
+  }, [filteredInvoices, currentPage, pageSize])
+
+  const handleExportCsv = () => {
+    exportToCsv({
+      filename: 'invoices-export',
+      data: filteredInvoices,
+      columns: [
+        { header: 'Invoice #', accessor: 'id' },
+        { header: 'Account Name', accessor: 'accountName' },
+        { header: 'Subtext', accessor: 'accountSubtext' },
+        { header: 'Billing Period', accessor: 'billingPeriod' },
+        { header: 'Issued Date', accessor: 'issuedDate' },
+        { header: 'Due Date', accessor: 'dueDate' },
+        { header: 'Total (CAD)', accessor: 'totalFormatted' },
+        { header: 'Paid So Far', accessor: 'paidSoFarFormatted' },
+        { header: 'Status', accessor: 'status' },
+      ],
+    })
+  }
+
+  const handlePostPayment = () => {
+    setInvoices((prev) =>
+      prev.map((inv) =>
+        inv.id === 'INV-2026-0041'
+          ? { ...inv, status: 'PAID' as const, paidSoFar: inv.total, paidSoFarFormatted: inv.totalFormatted }
+          : inv,
+      ),
+    )
+    toast.success('Payment Recorded', 'Remittance of $1,240.50 CAD posted to INV-2026-0041')
+    setFrameState('detail')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[#F3F4F6] text-neutral-900 font-sans antialiased">
@@ -390,6 +434,7 @@ export function InvoicesPage() {
                 <div className="flex items-center gap-2.5">
                   <button
                     type="button"
+                    onClick={handleExportCsv}
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3.5 py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-xs cursor-pointer"
                   >
                     <Download className="size-3.5 text-neutral-400" />
@@ -645,7 +690,7 @@ export function InvoicesPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100 font-medium">
-                      {filteredInvoices.map((inv) => (
+                      {pagedInvoices.map((inv) => (
                         <tr
                           key={inv.id}
                           className="hover:bg-neutral-50/80 transition cursor-pointer"
@@ -781,58 +826,21 @@ export function InvoicesPage() {
                 {/* Pagination */}
                 <div className="flex flex-wrap items-center justify-between border-t border-neutral-200 bg-[#F9FAFB] px-4 py-3 text-xs text-neutral-500">
                   <div className="flex items-center gap-2">
-                    <span>Showing 1–8 of 64 invoices</span>
+                    <span>Showing {pagedInvoices.length > 0 ? (currentPage - 1) * pageSize + 1 : 0}–{Math.min(currentPage * pageSize, 64)} of 64 invoices</span>
                     <span>•</span>
                     <span className="text-[10px] text-neutral-400">
                       BridgeCabs General Ledger sync healthy
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-600 text-xs"
-                    >
-                      Prev
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded bg-[#C4161C] text-white font-bold text-xs"
-                    >
-                      1
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 text-xs"
-                    >
-                      2
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 text-xs"
-                    >
-                      3
-                    </button>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 text-xs"
-                    >
-                      4
-                    </button>
-                    <span className="px-1 text-neutral-400">...</span>
-                    <button
-                      type="button"
-                      className="size-7 rounded border border-neutral-200 bg-white text-neutral-700 text-xs"
-                    >
-                      8
-                    </button>
-                    <button
-                      type="button"
-                      className="px-2 py-1 rounded border border-neutral-200 bg-white text-neutral-600 text-xs"
-                    >
-                      Next
-                    </button>
-                  </div>
+                  <TablePagination
+                    currentPage={currentPage}
+                    totalPages={Math.max(totalPages, 8)}
+                    totalItems={64}
+                    pageSize={pageSize}
+                    onPageChange={setCurrentPage}
+                    className="border-0 p-0 bg-transparent shadow-none"
+                  />
                 </div>
               </div>
             </div>
@@ -1560,7 +1568,7 @@ export function InvoicesPage() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFrameState('detail')}
+                    onClick={handlePostPayment}
                     className="flex items-center gap-1.5 rounded-lg bg-[#C4161C] hover:bg-[#9E1017] px-5 py-2 text-xs font-bold text-white shadow-xs cursor-pointer"
                   >
                     <Check className="size-4" />

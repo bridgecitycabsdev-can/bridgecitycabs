@@ -29,6 +29,9 @@ import {
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { TablePagination } from '@/components/ui/pagination'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface PastReportItem {
   id: string
@@ -216,16 +219,75 @@ export function ReportsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isCopied, setIsCopied] = useState(false)
   const [showDownloadToast, setShowDownloadToast] = useState(false)
+  const [pastReports, setPastReports] = useState<PastReportItem[]>(PAST_REPORTS_FRAME1)
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 8
+
+  const filteredReports = pastReports.filter((report) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      return (
+        report.fileName.toLowerCase().includes(q) ||
+        report.branch.toLowerCase().includes(q) ||
+        report.requesterName.toLowerCase().includes(q)
+      )
+    }
+    return true
+  })
+
+  const totalPages = Math.max(1, Math.ceil(filteredReports.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const pagedReports = filteredReports.slice(
+    (safeCurrentPage - 1) * pageSize,
+    safeCurrentPage * pageSize,
+  )
+  const showingStart = filteredReports.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize + 1
+  const showingEnd = Math.min(safeCurrentPage * pageSize, filteredReports.length)
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText('https://dispatch.bridgecabs.ca/reports/booking-report-2026-11-01_to_2026-11-15.csv')
     setIsCopied(true)
     setTimeout(() => setIsCopied(false), 2000)
+    toast.info('Link Copied', 'Download URL copied to clipboard.')
   }
 
   const handleDownloadReport = () => {
+    const headers = [
+      'Booking ID',
+      'Pickup Time',
+      'Driver Callsign',
+      'Pickup Location',
+      'Dropoff Location',
+      'Metered Fare ($ CAD)',
+      'Payment Method',
+      'Bylaw Compliance',
+    ]
+    const rows = [
+      ['BK-88204-01', '2026-11-15 08:14 MST', 'Unit U-214 (H. Singh)', '340 Columbia Blvd W', 'Univ of Lethbridge Hall B', '19.63', 'Cash', 'OK (Bylaw #6205)'],
+      ['BK-88204-02', '2026-11-15 09:30 MST', 'Unit U-108 (S. Jenkins)', 'Lethbridge Airport YQL', 'Sandman Signature Lodge', '25.00', 'Credit Card', 'OK (Bylaw #6205)'],
+      ['BK-88204-03', '2026-11-15 10:12 MST', 'Unit U-301 (D. Miller)', 'Galt Museum & Archives', 'Chinook Regional Hospital', '14.20', 'City Voucher', 'OK (Bylaw #6205)'],
+      ['BK-88204-04', '2026-11-15 11:45 MST', 'Unit U-112 (E. Liu)', 'Lethbridge Centre Mall', 'Park Lake Provincial Park', '34.80', 'Corporate Direct', 'OK (Bylaw #6205)'],
+    ]
+    exportToCsv('booking-report-2026-11-01_to_2026-11-15.csv', headers, rows)
     setShowDownloadToast(true)
     setTimeout(() => setShowDownloadToast(false), 4000)
+  }
+
+  const handleGenerateReport = () => {
+    const newReport: PastReportItem = {
+      id: `rep-${Date.now()}`,
+      fileName: `booking-report-${new Date().toISOString().slice(0, 10)}.csv`,
+      branch: 'Lethbridge (YQL)',
+      dateRange: '01 Nov – 15 Nov 2026',
+      requesterInitials: 'PV',
+      requesterName: 'Priya V.',
+      status: 'READY',
+      recordsCount: '1,420 trips',
+      fileSize: '412 KB',
+      format: 'CSV',
+    }
+    setPastReports((prev) => [newReport, ...prev])
+    setActiveFrame('frame2')
   }
 
   return (
@@ -509,7 +571,7 @@ export function ReportsPage() {
                     {/* Generate Report Button */}
                     <button
                       type="button"
-                      onClick={() => setActiveFrame('frame2')}
+                      onClick={handleGenerateReport}
                       className="w-full py-2.5 px-4 rounded-xl bg-[#C4161C] hover:bg-[#9E1017] text-white text-xs font-bold transition shadow-xs flex items-center justify-center gap-2 cursor-pointer"
                     >
                       <Sparkles className="size-4" />
@@ -539,20 +601,31 @@ export function ReportsPage() {
                           type="text"
                           placeholder="Filter files..."
                           value={searchQuery}
-                          onChange={(e) => setSearchQuery(e.target.value)}
+                          onChange={(e) => {
+                            setSearchQuery(e.target.value)
+                            setCurrentPage(1)
+                          }}
                           className="pl-8 pr-3 py-1.5 rounded-lg border border-neutral-200 text-xs text-neutral-800 placeholder-neutral-400 focus:outline-none focus:ring-1 focus:ring-[#C4161C] w-40"
                         />
                       </div>
                       <button
                         type="button"
-                        className="p-1.5 rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50"
+                        onClick={() => {
+                          setSearchQuery('')
+                          setCurrentPage(1)
+                        }}
+                        className="p-1.5 rounded-lg border border-neutral-200 text-neutral-500 hover:bg-neutral-50 cursor-pointer"
+                        title="Reset"
                       >
                         <RefreshCw className="size-3.5" />
                       </button>
                       <button
                         type="button"
-                        onClick={() => setSearchQuery('')}
-                        className="px-2.5 py-1.5 rounded-lg border border-neutral-200 text-xs font-bold text-neutral-600 hover:bg-neutral-50"
+                        onClick={() => {
+                          setSearchQuery('')
+                          setCurrentPage(1)
+                        }}
+                        className="px-2.5 py-1.5 rounded-lg border border-neutral-200 text-xs font-bold text-neutral-600 hover:bg-neutral-50 cursor-pointer"
                       >
                         Clear
                       </button>
@@ -571,7 +644,7 @@ export function ReportsPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100 font-medium">
-                        {PAST_REPORTS_FRAME1.map((report) => (
+                        {pagedReports.map((report) => (
                           <tr
                             key={report.id}
                             onClick={() => setActiveFrame('frame3')}
@@ -602,33 +675,16 @@ export function ReportsPage() {
                   </div>
 
                   {/* Table Footer */}
-                  <div className="pt-3 border-t border-neutral-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[11px] text-neutral-400">
-                    <div>
-                      <span>
-                        Showing <strong>1-8</strong> of 24 archived reports
-                      </span>
-                      <span className="mx-2">•</span>
-                      <span>Files stored for 90 days in encrypted transit storage</span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button type="button" className="px-2 py-0.5 rounded border border-neutral-200 text-neutral-500">
-                        Prev
-                      </button>
-                      <button type="button" className="px-2 py-0.5 rounded bg-[#C4161C] text-white font-bold">
-                        1
-                      </button>
-                      <button type="button" className="px-2 py-0.5 rounded border border-neutral-200 text-neutral-600">
-                        2
-                      </button>
-                      <button type="button" className="px-2 py-0.5 rounded border border-neutral-200 text-neutral-600">
-                        3
-                      </button>
-                      <button type="button" className="px-2 py-0.5 rounded border border-neutral-200 text-neutral-500">
-                        Next
-                      </button>
-                    </div>
-                  </div>
+                  <TablePagination
+                    currentPage={safeCurrentPage}
+                    totalPages={totalPages}
+                    onPageChange={setCurrentPage}
+                    showingStart={showingStart}
+                    showingEnd={showingEnd}
+                    totalCount={filteredReports.length}
+                    entityName="archived reports"
+                    ledgerCode="Files stored for 90 days in encrypted transit storage"
+                  />
 
                   {/* Reporting Compliance Footer Bar */}
                   <div className="p-2.5 rounded-xl bg-neutral-50 border border-neutral-200 flex items-center justify-between text-[11px] text-neutral-600">

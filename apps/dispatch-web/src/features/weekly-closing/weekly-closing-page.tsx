@@ -26,6 +26,8 @@ import {
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AdminSidebar } from '@/components/AdminSidebar'
+import { toast } from '@/components/ui/toast'
+import { exportToCsv } from '@/lib/export-csv'
 
 export interface WeeklyPeriod {
   weekNo: number
@@ -156,6 +158,36 @@ export function WeeklyClosingPage() {
   const [showFinalizeModal, setShowFinalizeModal] = useState(false)
   const [recomputingProgress, setRecomputingProgress] = useState(68)
   const [isFinalizedState, setIsFinalizedState] = useState(false)
+
+  const handleExportCSV = () => {
+    const headers = [
+      'Week #',
+      'Cycle ID',
+      'Date Range',
+      'Status',
+      'Opening Balance ($)',
+      'Movement ($)',
+      'Closing Balance ($)',
+      'Closing Label',
+    ]
+    const rows = DEFAULT_PERIODS.map((item) => [
+      item.weekNo,
+      item.cycleId,
+      item.dateRange,
+      item.status,
+      item.openingFormatted,
+      item.movementFormatted,
+      item.closingFormatted,
+      item.closingLabel,
+    ])
+    exportToCsv('weekly-closing-periods.csv', headers, rows)
+  }
+
+  const handleFinalize = () => {
+    setIsFinalizedState(true)
+    setShowFinalizeModal(false)
+    toast.success('Period Finalized & Sealed', 'Municipal ledger hash generated: #AUD-YQL-2026-W47-8891')
+  }
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-[#F8F9FA] text-neutral-900 font-sans">
@@ -302,7 +334,8 @@ export function WeeklyClosingPage() {
                   <div className="flex items-center gap-3">
                     <button
                       type="button"
-                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition"
+                      onClick={handleExportCSV}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-neutral-700 bg-white border border-neutral-300 rounded-lg hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
                     >
                       <Download className="size-3.5" />
                       Export CSV
@@ -1111,7 +1144,8 @@ export function WeeklyClosingPage() {
                   </span>
                   <button
                     type="button"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-2xs transition"
+                    onClick={handleExportCSV}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-50 shadow-2xs transition cursor-pointer"
                   >
                     <Download className="size-3.5" />
                     Export CSV
@@ -1749,10 +1783,7 @@ export function WeeklyClosingPage() {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setIsFinalizedState(true)
-                  setShowFinalizeModal(false)
-                }}
+                onClick={handleFinalize}
                 className="px-4 py-1.5 rounded-lg bg-[#C4161C] text-white text-xs font-bold"
               >
                 Lock &amp; Finalize

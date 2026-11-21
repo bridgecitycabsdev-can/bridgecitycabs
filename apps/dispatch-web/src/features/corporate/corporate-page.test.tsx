@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useSession, type Profile } from '@/app/session'
@@ -36,5 +36,46 @@ describe('Corporate accounts page', () => {
     expect(screen.getByText('Lethbridge College')).toBeTruthy()
     expect(screen.getByText('Galt Museum & Archives')).toBeTruthy()
     expect(screen.getByText('Cavendish Farms Corp')).toBeTruthy()
+  })
+
+  it('filters accounts dynamically by search query and resets filter', () => {
+    const client = new QueryClient()
+    render(
+      <QueryClientProvider client={client}>
+        <BrowserRouter>
+          <CorporatePage />
+        </BrowserRouter>
+      </QueryClientProvider>,
+    )
+
+    const searchInput = screen.getByPlaceholderText(/Search company name, account #/i)
+    fireEvent.change(searchInput, { target: { value: 'Cavendish' } })
+
+    expect(screen.getByText('Cavendish Farms Corp')).toBeTruthy()
+    expect(screen.queryByText('Prairie Health Group')).toBeNull()
+
+    const resetButton = screen.getByText('Reset')
+    fireEvent.click(resetButton)
+
+    expect(screen.getByText('Prairie Health Group')).toBeTruthy()
+  })
+
+  it('navigates to Frame 3 drawer and creates a new corporate account', () => {
+    const client = new QueryClient()
+    render(
+      <QueryClientProvider client={client}>
+        <BrowserRouter>
+          <CorporatePage />
+        </BrowserRouter>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(screen.getByText('New account'))
+    expect(screen.getByText('Add / Edit Corporate Account')).toBeTruthy()
+
+    const saveButton = screen.getByText('Save Account')
+    fireEvent.click(saveButton)
+
+    expect(screen.getByText('Frame 1: Account List (ACTIVE)')).toBeTruthy()
   })
 })

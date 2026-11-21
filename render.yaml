@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: bridgecabs-api-staging
+    env: node
+    plan: free
+    region: oregon
+    buildCommand: pnpm --filter api build
+    startCommand: cd apps/api && node dist/main
+    envVars:
+      - key: NODE_ENV
+        value: staging
+      - key: PORT
+        value: 3000

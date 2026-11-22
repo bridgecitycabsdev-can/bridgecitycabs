@@ -259,8 +259,8 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1(supports-color@7.2.0)
       firebase-admin:
-        specifier: ^14.5.0
-        version: 14.5.0(supports-color@7.2.0)
+        specifier: ^14.5.1
+        version: 14.5.1(supports-color@7.2.0)
       helmet:
         specifier: ^8.3.0
         version: 8.3.0
@@ -3503,8 +3503,8 @@ packages:
     resolution: {integrity: sha512-1yD6RmLI1XBfxugvORwlck6f75tYL+iR0jqwsOrOxMZyGYqUuDhJ0l4AXdO1iX/FTs9cBAMEk1gWSEx1kSbylg==}
     engines: {node: '>=6'}
 
-  firebase-admin@14.5.0:
-    resolution: {integrity: sha512-DElmgmaH9aPXu2dWXGQiDoan33UfTnbfAAKaue4fwEZxmpdaNrTk5DmuFn+vVDki2KZ6TiaC0IHRWcEzcDxB3Q==}
+  firebase-admin@14.5.1:
+    resolution: {integrity: sha512-3NSWRREeFCET2tyiOd0ENvRFdagi9voBRGCiNbGSIRbwuMJh2Eh/dcmItNWd82rcqd+fyW5/77/oZOZxC27/sA==}
     engines: {node: '>=22'}
 
   fontkit@2.0.4:
@@ -8859,7 +8859,7 @@ snapshots:
     dependencies:
       locate-path: 3.0.0
 
-  firebase-admin@14.5.0(supports-color@7.2.0):
+  firebase-admin@14.5.1(supports-color@7.2.0):
     dependencies:
       '@fastify/busboy': 3.2.2
       '@firebase/database-compat': 2.1.7

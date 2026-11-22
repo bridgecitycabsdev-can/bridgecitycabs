@@ -2,7 +2,7 @@
 export function allowedWsOrigins(raw: string | undefined) {
   const origins = (raw ?? '')
     .split(',')
-    .map((origin) => origin.trim())
+    .map((origin) => origin.trim().replace(/\/+$/, ''))
     .filter((origin) => origin.length > 0);
 
   for (const origin of origins) {

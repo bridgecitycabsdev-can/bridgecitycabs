@@ -215,9 +215,10 @@ export class FinanceService {
           status: 'PENDING',
         });
         pendingDrivers.add(row.driverId);
-      } catch (error) {
+      } catch (error: any) {
         if (
-          error instanceof Prisma.PrismaClientKnownRequestError &&
+          (error instanceof Prisma.PrismaClientKnownRequestError ||
+            error?.code === 'P2002') &&
           error.code === 'P2002'
         ) {
           skipped.push({
@@ -362,7 +363,7 @@ export class FinanceService {
             where: { accountId: { in: accounts.map((a) => a.id) } },
             _sum: { amountCents: true },
           });
-    const sumByAccount = new Map(
+    const sumByAccount = new Map<string, number>(
       sums.map((row) => [row.accountId, row._sum.amountCents ?? 0] as const),
     );
 
@@ -443,7 +444,7 @@ export class FinanceService {
     const trackingByBooking = new Map(
       bookings.map((row) => [row.id, row.trackingId] as const),
     );
-    const bookingByReversal = new Map(
+    const bookingByReversal = new Map<string, string>(
       originals
         .filter((row) => row.sourceType === 'BOOKING')
         .map((row) => [row.id, row.sourceId] as const),

@@ -553,8 +553,8 @@ export class InvoiceService {
       },
       _sum: { totalCents: true },
     });
-    const byAccount = new Map(
-      grouped.map((g) => [g.corporateAccountId, g._sum.totalCents ?? 0]),
+    const byAccount = new Map<string, number>(
+      grouped.map((g) => [g.corporateAccountId, g._sum.totalCents ?? 0] as const),
     );
     const grand = accountIds.reduce(
       (s, id) => s + (byAccount.get(id) ?? 0),

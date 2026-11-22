@@ -164,9 +164,10 @@ export class FareRulesService {
   private async write<T>(action: () => Promise<T>): Promise<T> {
     try {
       return await action();
-    } catch (error) {
+    } catch (error: any) {
       if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
+        (error instanceof Prisma.PrismaClientKnownRequestError ||
+          error?.code === 'P2002') &&
         error.code === 'P2002'
       ) {
         throw new ConflictException(

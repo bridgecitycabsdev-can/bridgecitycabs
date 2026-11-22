@@ -49,7 +49,7 @@ export class FleetQueryService {
           })
         : [],
     ]);
-    const startedAt = new Map(shifts.map((shift) => [shift.driverId, shift.startedAt]));
+    const startedAt = new Map<string, Date>(shifts.map((shift) => [shift.driverId, shift.startedAt] as const));
     const jobsToday = new Map(
       jobs.flatMap((row) => (row.driverId ? [[row.driverId, row._count._all] as const] : [])),
     );

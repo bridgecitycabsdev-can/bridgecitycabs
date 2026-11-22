@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "build": "pnpm --filter dispatch-web build && node -e \"const fs = require('fs'); if (fs.existsSync('apps/dispatch-web/dist') && !fs.existsSync('dist')) { fs.cpSync('apps/dispatch-web/dist', 'dist', { recursive: true }); }\"",
     "test": "pnpm --filter api test && pnpm --filter dispatch-web test",
     "tokens:build": "pnpm --filter @bridgecabs/design-tokens build"
   },

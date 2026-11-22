@@ -1,0 +1,7 @@
+{
+  "buildCommand": "pnpm --filter dispatch-web build",
+  "outputDirectory": "apps/dispatch-web/dist",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}

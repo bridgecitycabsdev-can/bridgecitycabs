@@ -21,7 +21,7 @@ class DriverProfileInfoTab extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
       children: [
         // 1. Driver Rating Strip
-        _buildRatingSection(hasRating),
+        _buildRatingSection(context, hasRating),
         const SizedBox(height: 14),
 
         // 2. Driver Credentials Form
@@ -42,7 +42,7 @@ class DriverProfileInfoTab extends StatelessWidget {
     );
   }
 
-  Widget _buildRatingSection(bool hasRating) {
+  Widget _buildRatingSection(BuildContext context, bool hasRating) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(

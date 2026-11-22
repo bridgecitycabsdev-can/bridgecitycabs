@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../data/models/driver_cancel_reason.dart';
 import '../data/models/driver_trip_config.dart';
+import '../data/models/driver_trip_model.dart';
 import '../data/models/driver_trip_status.dart';
 import '../data/repositories/driver_trip_repository.dart';
 import 'driver_trip_event.dart';

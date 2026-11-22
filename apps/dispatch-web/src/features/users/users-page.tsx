@@ -275,7 +275,7 @@ export function UsersPage() {
         <div className="bg-white border-b border-neutral-200 px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-600 mr-1">
-              FLOW:
+              {activeFrame === 'frame4' ? 'FRAMES:' : 'FLOW:'}
             </span>
             <button
               type="button"
@@ -304,7 +304,9 @@ export function UsersPage() {
                   : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
               }`}
             >
-              Frame 2: Change Role Dialog
+              {activeFrame === 'frame2' || isRoleModalOpen
+                ? 'Frame 2: Change Role Dialog (Active)'
+                : 'Frame 2: Change Role Dialog'}
             </button>
             <button
               type="button"
@@ -318,7 +320,9 @@ export function UsersPage() {
                   : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
               }`}
             >
-              Frame 3: Result &amp; Edge States
+              {activeFrame === 'frame3'
+                ? 'Frame 3: Result & Edge States (Active)'
+                : 'Frame 3: Result & Edge States'}
             </button>
             <button
               type="button"
@@ -332,14 +336,23 @@ export function UsersPage() {
                   : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
               }`}
             >
-              Frame 4: No-Access Gated State
+              {activeFrame === 'frame4'
+                ? 'Frame 4: No-Access Gated State (Active)'
+                : 'Frame 4: No-Access Gated State'}
             </button>
           </div>
 
-          <div className="flex items-center gap-2 text-xs font-bold text-neutral-700">
-            <ShieldCheck className="size-3.5 text-neutral-500" />
-            <span>Role: Super Admin (Root) • Company-Wide RBAC</span>
-          </div>
+          {activeFrame === 'frame4' ? (
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-100 text-[#C4161C] border border-red-200 text-xs font-bold">
+              <Lock className="size-3" />
+              <span>Security Intercept #SEC-403-USERS</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-xs font-bold text-neutral-700">
+              <ShieldCheck className="size-3.5 text-neutral-500" />
+              <span>Role: Super Admin (Root) • Company-Wide RBAC</span>
+            </div>
+          )}
         </div>
 
         {/* Main Content Area */}
@@ -1032,7 +1045,7 @@ export function UsersPage() {
           {activeFrame === 'frame4' && (
             <div className="space-y-6">
               {/* Access Restricted Center Card */}
-              <div className="max-w-md mx-auto bg-white rounded-3xl border border-neutral-200 shadow-2xl p-8 text-center space-y-4">
+              <div className="max-w-md mx-auto bg-white rounded-3xl border border-neutral-200 border-t-4 border-t-[#C4161C] shadow-2xl p-8 text-center space-y-4">
                 <div className="text-[10px] font-extrabold uppercase tracking-wider text-[#C4161C] flex items-center justify-center gap-1">
                   <span className="size-1.5 rounded-full bg-[#C4161C]" />
                   SECURITY BOUNDARY ENFORCEMENT · STRICT RBAC

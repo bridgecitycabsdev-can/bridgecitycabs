@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "prebuild": "pnpm --filter @bridgecabs/shared-types build && pnpm --filter @bridgecabs/design-tokens build && pnpm --filter @bridgecabs/api-client build",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/copy-dist.js",
     "lint": "oxlint",
     "test": "vitest run",
     "preview": "vite preview"

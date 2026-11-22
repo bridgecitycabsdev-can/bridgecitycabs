@@ -1,6 +1,6 @@
 [build]
   command = "pnpm --filter dispatch-web build"
-  publish = "apps/dispatch-web/dist"
+  publish = "dist"
 
 [[redirects]]
   from = "/*"

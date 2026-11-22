@@ -17,7 +17,7 @@ export function ensureFleetSocket(client: QueryClient) {
   queryClient = client
   closed = false
   const current = fleetSocket()
-  if (!current.connected) current.connect()
+  if (current && !current.connected) current.connect()
   return current
 }
 
@@ -34,7 +34,7 @@ registerFleetStop(() => {
 function fleetSocket() {
   if (!socket) {
     socket = createSocket(`${env.wsUrl}/dispatch`, getAccessToken)
-    bindFleetSocket(socket)
+    if (socket) bindFleetSocket(socket)
   }
   return socket
 }

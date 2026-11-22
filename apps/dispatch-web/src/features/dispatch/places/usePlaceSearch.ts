@@ -46,7 +46,7 @@ export function usePlaceSearch() {
           params: { query: { q: query, session: session.current } },
           signal: controller.signal,
         })
-        .then(async (result) => {
+        .then(async (result: any) => {
           if (controller.signal.aborted || !result.response.ok) return
           const parsed = z.array(suggestionSchema).safeParse(await jsonBody(result))
           if (parsed.success) {

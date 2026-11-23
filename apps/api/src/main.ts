@@ -19,12 +19,14 @@ import { REDIS, REDIS_SUBSCRIBER } from './redis/redis.constants.js';
 initSentry();
 
 async function bootstrap() {
+  console.log('[Boot] Step 1: creating Nest app...');
   // Disable Nest's default parser so the Stripe webhook can receive a raw body
   // for signature verification; JSON parsing is re-enabled for every other route.
   const app = await NestFactory.create(AppModule, {
     bodyParser: false,
     bufferLogs: true,
   });
+  console.log('[Boot] Step 2: app created, setting up middleware...');
   app.useLogger(app.get(Logger));
   app.use(helmet());
   app.use(correlationMiddleware);
@@ -90,7 +92,9 @@ async function bootstrap() {
     void onSignal('SIGINT');
   });
 
-  await app.listen(process.env.PORT ?? 3000);
+  const port = process.env.PORT ?? 3000;
+  await app.listen(port);
+  console.log(`[BridgeCabs API] Ready and listening on http://localhost:${port}`);
 }
 await bootstrap();
 
